@@ -1,0 +1,17 @@
+.env
+.git/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+*.egg-info/
+database/*.db
+exports/
+logs/*.log
+tickets/
+docs/
+.muse
+.mventor
+profile.md
