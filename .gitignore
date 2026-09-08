@@ -1,0 +1,64 @@
+# Contractor-Bot .gitignore
+
+# Environment variables (never commit real token)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific exports (generated, never commit)
+exports/pdf/*
+exports/excel/*
+exports/preview/*
+exports/pdf_database/*
+!exports/pdf/.gitkeep
+!exports/excel/.gitkeep
+!exports/preview/.gitkeep
+!exports/pdf_database/.gitkeep
+
+# Database (clean start - no data files in repo)
+database/*.db
+database/*.xlsx
+!database/.gitkeep
+
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+# Excel COM temporary files
+~$*.xlsx
+*.xlsx.*
+
+# Private - never commit (local AI/working data)
+.env
+tickets/
+docs/
+.muse
+.mventor
+profile.md
+PROFILE.md
+*VISION*
+.vision/

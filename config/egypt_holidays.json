@@ -1,0 +1,103 @@
+{
+  "_meta": {
+    "description": "Egyptian national public holidays. Islamic holidays (Eid, Ramadan, Muharram, etc.) are tentative — actual dates depend on moon sighting and may shift by ±1 day.",
+    "source": "timeanddate.com, officeholidays.com, holidayapi.com",
+    "last_updated": "2026-07-12",
+    "notes": "Friday is always a non-working day (weekend). Saturday is a regular working day in Egypt."
+  },
+  "holidays": {
+    "2025": {
+      "fixed": [
+        {"date": "2025-01-07", "name": "Coptic Christmas Day", "type": "national"},
+        {"date": "2025-01-25", "name": "Revolution Day January 25", "type": "national"},
+        {"date": "2025-04-21", "name": "Spring Festival (Sham El Nessim)", "type": "national"},
+        {"date": "2025-04-25", "name": "Sinai Liberation Day", "type": "national"},
+        {"date": "2025-05-01", "name": "Labor Day", "type": "national"},
+        {"date": "2025-06-30", "name": "June 30 Revolution", "type": "national"},
+        {"date": "2025-07-23", "name": "Revolution Day July 23", "type": "national"},
+        {"date": "2025-10-06", "name": "Armed Forces Day", "type": "national"},
+        {"date": "2025-11-01", "name": "Grand Egyptian Museum Opening Holiday", "type": "national"}
+      ],
+      "islamic": [
+        {"date": "2025-03-29", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2025-03-30", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2025-03-31", "name": "Eid el Fitr", "type": "national"},
+        {"date": "2025-04-01", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2025-04-02", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2025-06-05", "name": "Arafat Day", "type": "national"},
+        {"date": "2025-06-06", "name": "Eid al-Adha", "type": "national"},
+        {"date": "2025-06-07", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2025-06-08", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2025-06-09", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2025-06-26", "name": "Muharram (Islamic New Year)", "type": "national"},
+        {"date": "2025-09-04", "name": "Prophet Mohamed's Birthday", "type": "national"}
+      ],
+      "substitute": [
+        {"date": "2025-04-24", "name": "Day off for Sinai Liberation Day", "type": "national"},
+        {"date": "2025-07-03", "name": "Day off for June 30 Revolution", "type": "national"},
+        {"date": "2025-07-24", "name": "Day off for Revolution Day July 23", "type": "national"},
+        {"date": "2025-10-09", "name": "Day off for Armed Forces Day", "type": "national"}
+      ]
+    },
+    "2026": {
+      "fixed": [
+        {"date": "2026-01-07", "name": "Coptic Christmas Day", "type": "national"},
+        {"date": "2026-01-25", "name": "Revolution Day January 25", "type": "national"},
+        {"date": "2026-04-13", "name": "Spring Festival (Sham El Nessim)", "type": "national"},
+        {"date": "2026-04-25", "name": "Sinai Liberation Day", "type": "national"},
+        {"date": "2026-05-01", "name": "Labor Day", "type": "national"},
+        {"date": "2026-06-30", "name": "June 30 Revolution", "type": "national"},
+        {"date": "2026-07-23", "name": "Revolution Day July 23", "type": "national"},
+        {"date": "2026-10-06", "name": "Armed Forces Day", "type": "national"}
+      ],
+      "islamic": [
+        {"date": "2026-03-19", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2026-03-20", "name": "Eid el Fitr", "type": "national"},
+        {"date": "2026-03-21", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2026-03-22", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2026-03-23", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2026-05-26", "name": "Arafat Day", "type": "national"},
+        {"date": "2026-05-27", "name": "Eid al-Adha", "type": "national"},
+        {"date": "2026-05-28", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2026-05-29", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2026-05-30", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2026-05-31", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2026-06-18", "name": "Day off for Muharram (Islamic New Year)", "type": "national"},
+        {"date": "2026-08-26", "name": "Prophet Mohamed's Birthday", "type": "national"}
+      ],
+      "substitute": [
+        {"date": "2026-01-29", "name": "Day off for Revolution Day January 25", "type": "national"},
+        {"date": "2026-07-02", "name": "Day off for June 30 Revolution", "type": "national"},
+        {"date": "2026-10-08", "name": "Day off for Armed Forces Day", "type": "national"}
+      ]
+    },
+    "2027": {
+      "fixed": [
+        {"date": "2027-01-07", "name": "Coptic Christmas Day", "type": "national"},
+        {"date": "2027-01-25", "name": "Revolution Day January 25", "type": "national"},
+        {"date": "2027-04-25", "name": "Sinai Liberation Day", "type": "national"},
+        {"date": "2027-05-01", "name": "Labor Day", "type": "national"},
+        {"date": "2027-05-03", "name": "Spring Festival (Sham El Nessim)", "type": "national"},
+        {"date": "2027-06-30", "name": "June 30 Revolution", "type": "national"},
+        {"date": "2027-07-23", "name": "Revolution Day July 23", "type": "national"},
+        {"date": "2027-10-06", "name": "Armed Forces Day", "type": "national"}
+      ],
+      "islamic": [
+        {"date": "2027-03-10", "name": "Eid el Fitr", "type": "national"},
+        {"date": "2027-03-11", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2027-03-12", "name": "Eid el Fitr Holiday", "type": "national"},
+        {"date": "2027-05-16", "name": "Arafat Day", "type": "national"},
+        {"date": "2027-05-17", "name": "Eid al-Adha", "type": "national"},
+        {"date": "2027-05-18", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2027-05-19", "name": "Eid al-Adha Holiday", "type": "national"},
+        {"date": "2027-06-07", "name": "Muharram (Islamic New Year)", "type": "national"},
+        {"date": "2027-08-15", "name": "Prophet Mohamed's Birthday", "type": "national"}
+      ],
+      "substitute": [
+        {"date": "2027-01-28", "name": "Day off for Revolution Day January 25", "type": "national"},
+        {"date": "2027-07-01", "name": "Day off for June 30 Revolution", "type": "national"},
+        {"date": "2027-10-07", "name": "Day off for Armed Forces Day", "type": "national"}
+      ]
+    }
+  }
+}
