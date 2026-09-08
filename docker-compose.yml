@@ -1,0 +1,28 @@
+# Contractor-Bot: bot + Postgres. Needs .env with BOT_TOKEN + POSTGRES_PASSWORD.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-contractor_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-contractor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-contractor}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-contractor_bot}}
+    volumes:
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      - ./templates:/app/templates:ro
+      - ./config:/app/config:ro
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

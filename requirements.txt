@@ -7,7 +7,8 @@ openpyxl>=3.1.0,<4.0.0
 
 # PDF generation V1 (Windows only - Excel COM, pixel-perfect)
 # V2 will use LibreOffice headless instead (see README)
-pywin32>=306
+# win32 marker: skipped on Linux so Docker builds work
+pywin32>=306; sys_platform == "win32"
 
 # Configuration
 PyYAML>=6.0,<7.0

@@ -10,7 +10,7 @@
 
 ## Stack (V1 vs V2)
 
-- **V1 (current): Microsoft Excel** - `openpyxl` template fill + `pywin32` Excel COM pixel-perfect PDF (Windows-only). Company templates in `templates/`, cell map in `config/config.yaml`. Templates are sacred: fill cells only.
+- **V1 (current): Microsoft Excel** - `openpyxl` template fill + `pywin32` Excel COM pixel-perfect PDF (Windows-only). Example templates in `templates/`, cell map in `config/config.yaml`. Templates are sacred: fill cells only.
 - **V2 (planned): LibreOffice** - headless convert replaces Excel COM for cross-platform PDF. Excel stays as fallback.
 - **DB:** V1 SQLite local (`database/contractor_bot.db`, gitignored) -> Postgres migration (multi-site isolation). `DATABASE_URL` in `.env`.
 - **Bot:** `python-telegram-bot` v21, Telegram-only UI. Python 3.12+.
@@ -39,6 +39,17 @@ python main.py --health
 python main.py
 ```
 
+## Docker
+
+```bash
+cp .env.example .env   # set BOT_TOKEN + POSTGRES_PASSWORD
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+- Services: `bot` (python:3.12-slim) + `db` (postgres:16-alpine, data in `pgdata` volume).
+- Limit: V1 PDF-via-Excel COM needs Windows + Excel, so PDF export runs on host only. Everything else (reports, Excel fill via openpyxl, Telegram) works in the container. The LibreOffice ticket removes this gap.
+
 ## Project Structure
 
 ```
@@ -65,8 +76,8 @@ Private folders (`tickets/`, `profile.md`, `.muse`, `.mventor`, vision data) sta
 
 ## Brand
 
-Atlas. Every produced doc carries the Atlas mini-logo + footer `Atlas Powered by [Company] - Working Project 15-NASH` (`00-ADMIN` omits project line). Company name TBD.
+Atlas. This public repo is company-free opensource. The Opal Construction fork (created after the V1 last ticket) applies the Atlas mini-logo + footer `Atlas Powered by Opal - Working Project <SITE>` on every doc it produces.
 
 ## License
 
-MIT - see LICENSE (TBD, inherits Labor-Report MIT).
+MIT - see LICENSE.
