@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         Parsed command line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Labor-Report - Telegram-based Daily Labor Report generator",
+        description="Atlas-Bot - construction daily labor tracker with period contractor reports",
         epilog="For more information, see the documentation in docs/",
     )
     parser.add_argument(
@@ -156,7 +156,7 @@ def run_health_check(config) -> bool:
 
 
 def main() -> None:
-    """Main entry point for Labor-Report.
+    """Main entry point for Atlas-Bot.
 
     Initializes configuration, logging, database, services,
     and starts the Telegram bot.
@@ -168,7 +168,7 @@ def main() -> None:
 
     try:
         logger.info("=" * 60)
-        logger.info("Labor-Report v1.0.0 starting...")
+        logger.info("Atlas-Bot v2.0.0a1 starting...")
         logger.info("=" * 60)
 
         # Load configuration
@@ -323,7 +323,7 @@ def main() -> None:
         app.post_stop = _on_stop
 
         logger.info("=" * 60)
-        logger.info("Labor-Report Bot is running! Press Ctrl+C to stop.")
+        logger.info("Atlas-Bot is running! Press Ctrl+C to stop.")
         logger.info("=" * 60)
 
         # Start polling (blocks until interrupted)

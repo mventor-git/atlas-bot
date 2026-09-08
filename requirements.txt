@@ -1,4 +1,4 @@
-# Contractor-Bot Dependencies (V1: Excel stack, Windows-only PDF)
+# Atlas-Bot Dependencies (Excel stack, Windows-only PDF)
 # Core
 python-telegram-bot>=21.0,<22.0
 

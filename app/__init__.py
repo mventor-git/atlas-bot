@@ -1,9 +1,9 @@
 """
-Labor-Report Application Package.
+Atlas-Bot Application Package.
 
-A Telegram-based application for automating Daily Labor Reports
-for construction sites.
+Telegram-based construction daily labor tracker with period
+contractor reports.
 """
 
-__version__ = "1.0.0"
-__app_name__ = "Labor-Report"
+__version__ = "2.0.0a1"
+__app_name__ = "Atlas-Bot"

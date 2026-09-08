@@ -1,10 +1,10 @@
-# Contractor-Bot: bot + Postgres. Needs .env with BOT_TOKEN + POSTGRES_PASSWORD.
+# Atlas-Bot: bot + Postgres. Needs .env with BOT_TOKEN + POSTGRES_PASSWORD.
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-contractor_bot}
+      POSTGRES_DB: ${POSTGRES_DB:-atlas_bot}
       POSTGRES_USER: ${POSTGRES_USER:-contractor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
