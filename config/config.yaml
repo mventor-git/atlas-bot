@@ -1,0 +1,134 @@
+# Contractor-Bot Configuration
+# ============================
+# All Excel cell positions and paths are configured here (V1 Excel stack).
+# Changing the template requires editing ONLY this file.
+# V2 will add a LibreOffice headless path alongside Excel.
+
+# Template settings
+template:
+  # Path to the tables workbook containing contractor and zone data
+  tables_file: "database/tables.xlsx"
+
+  # Multi-template system: auto-selects based on row count
+  small_template: "templates/small_template.xlsx"     # Up to 7 rows
+  medium_template: "templates/medium_template.xlsx"   # 8-20 rows
+  large_template: "templates/large_template.xlsx"     # 21+ rows
+  row_thresholds:
+    medium: 7    # Switch to medium_template when rows > this
+    large: 20    # Switch to large_template when rows > this
+
+  # Empty day template (for days with no labor)
+  empty_day_template: "templates/empty-day.xlsx"
+
+  # Contractor period report template
+  contractor_report_template: "templates/contractor_report_template.xlsx"
+
+  # Legacy template (used as fallback if new templates don't exist)
+  file: "templates/small_template.xlsx"
+
+# Cell mappings (Excel cell references)
+# Date and Day cells
+date:
+  cell: "B7"       # Date — merged B7:C7; has TODAY() formula (preserved automatically)
+  day_cell: "B5"   # Day name — merged B5:C5; filled with Arabic day name
+
+# Labor table configuration
+table:
+  # Row where the labor table data starts (row 10 is the header)
+  start_row: 11
+  # Column mappings for each field
+  # NOTE: Column A is unused (per template design)
+  columns:
+    serial: "B"      # "م" — Auto-increment serial number
+    contractor: "C"  # "اسم المقاول" — Contractor name
+    type: "D"        # "البند" — Contractor type/item
+    zone: "E"        # "مكان العمل" — Work zone
+    workers: "F"     # "عدد العمال" — Number of workers
+    details: "G"     # "العدد التفصيلي" — Detailed worker count
+
+# Output paths
+output:
+  pdf_folder: "exports/pdf"
+  excel_folder: "exports/excel"
+  preview_folder: "exports/preview"
+  pdf_database: "exports/pdf_database"  # Centralized PDF archive for all finalized reports
+
+# Database (V1 SQLite local, Postgres migration target - see DATABASE_URL)
+database:
+  path: "database/contractor_bot.db"
+
+# History Excel file
+history:
+  file: "database/history.xlsx"
+
+# Logging
+logging:
+  file: "logs/app.log"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  max_bytes: 10485760  # 10 MB log rotation
+  backup_count: 5
+
+# Sheets in tables.xlsx
+tables:
+  contractor_sheet: "tblContractor"
+  zones_sheet: "tblZones"
+
+# Report lifecycle (v2.0)
+lifecycle:
+  auto_lock_hours: 24       # Auto-lock reports after N hours (0=disabled)
+  max_versions: 50          # Maximum version snapshots per report
+  auto_finalize_hour: 17    # Auto-finalize today's drafts at this hour (24h, -1=disabled)
+  auto_finalize_minute: 0   # Minute for auto-finalization
+
+# Validation rules (v2.0)
+validation:
+  max_workers_per_contractor: 100   # Warn if exceeded
+  max_contractors_per_report: 50    # Warn if exceeded
+  min_workers_per_contractor: 1     # Warn if below
+  warn_duplicate_contractors: true  # Warn if same contractor added twice
+  warn_empty_details: true          # Warn if no details provided
+
+# Statistics (v2.0)
+statistics:
+  cache_ttl_minutes: 60     # How long to cache stats
+  top_n_contractors: 10     # Number of top contractors to track
+  top_n_zones: 10           # Number of top zones to track
+
+# Reporting window (when users can submit/edit reports)
+reporting_window:
+  start_hour: 8         # Window opens at 8 AM
+  start_minute: 0
+  end_hour: 17          # Window closes at 5 PM
+  end_minute: 0
+
+# Dashboard (v2.0)
+dashboard:
+  show_time_remaining: true  # Show countdown to deadline
+  deadline_hour: 14          # Submission deadline hour (24h)
+  deadline_minute: 0         # Submission deadline minute
+
+# Timezone & Calendar (for scheduling notifications, business hours, and holiday enforcement)
+timezone:
+  name: "Africa/Cairo"  # Egypt (UTC+2) — matches local machine timezone
+  holidays_and_friday: "enabled"  # "enabled" = auto-create empty PDFs on holidays/Friday, "disabled" = treat as normal working days
+
+# Authorization (v3.0)
+auth:
+  superadmin: "7830528991"       # Telegram user ID with super admin privileges
+  admins:                        # Additional admin user IDs
+    - "5252295448"               # User active 10-11am July 13 2026
+
+# Notification schedule
+notification:
+  enabled: true                      # Master switch for automated notifications
+  morning_reminder_hour: 9           # 9 AM - "Start your report" reminder
+  morning_reminder_minute: 0
+  late_morning_reminder_hour: 11     # 11 AM - follow-up reminder
+  late_morning_reminder_minute: 0
+  afternoon_reminder_hour: 14        # 2 PM - final reminder
+  afternoon_reminder_minute: 0
+  auto_no_report_hour: 17            # 5 PM - auto-create no_report entry
+  auto_no_report_minute: 0
+  empty_template_file: "templates/empty-day.xlsx"  # Template for empty days
+  check_interval_seconds: 30         # How often to check the time
+  send_to_admin_only: false          # Send notifications to all users or only admins
