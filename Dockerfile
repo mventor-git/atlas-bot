@@ -1,4 +1,4 @@
-# Contractor-Bot (V1: bot runs anywhere, PDF-via-Excel needs Windows host)
+# Atlas-Bot (bot runs anywhere, PDF-via-Excel needs Windows host)
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

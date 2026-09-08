@@ -1,8 +1,8 @@
-# Contractor-Bot Configuration
-# ============================
-# All Excel cell positions and paths are configured here (V1 Excel stack).
+# Atlas-Bot Configuration
+# ========================
+# All Excel cell positions and paths are configured here.
 # Changing the template requires editing ONLY this file.
-# V2 will add a LibreOffice headless path alongside Excel.
+# LibreOffice headless path is roadmap alongside Excel.
 
 # Template settings
 template:
@@ -53,9 +53,9 @@ output:
   preview_folder: "exports/preview"
   pdf_database: "exports/pdf_database"  # Centralized PDF archive for all finalized reports
 
-# Database (V1 SQLite local, Postgres migration target - see DATABASE_URL)
+# Database (SQLite local now, Postgres target - see DATABASE_URL)
 database:
-  path: "database/contractor_bot.db"
+  path: "database/atlas_bot.db"
 
 # History Excel file
 history:

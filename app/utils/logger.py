@@ -70,7 +70,7 @@ def _create_file_handler(log_path: Path, formatter: logging.Formatter, config: L
     return handler
 
 
-def setup_logger(config: Optional[LoggingConfig] = None, name: str = "labor_report") -> logging.Logger:
+def setup_logger(config: Optional[LoggingConfig] = None, name: str = "atlas_bot") -> logging.Logger:
     """Set up and configure the application logger.
 
     Creates a logger with both file and console handlers.
@@ -115,7 +115,7 @@ def setup_logger(config: Optional[LoggingConfig] = None, name: str = "labor_repo
     return logger
 
 
-def get_logger(name: str = "labor_report") -> logging.Logger:
+def get_logger(name: str = "atlas_bot") -> logging.Logger:
     """Get a named logger.
 
     If the logger hasn't been set up yet, sets it up with default config.

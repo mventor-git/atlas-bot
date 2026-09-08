@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "contractor-bot"
-version = "1.0.0a1"
-description = "Contractor-Bot - Telegram-based construction daily labor tracker with period contractor reports (V1 uses Excel, V2 moves to LibreOffice)"
+name = "atlas-bot"
+version = "2.0.0a1"
+description = "Atlas-Bot - Telegram-based construction daily labor tracker with period contractor reports (Excel templates now, LibreOffice roadmap)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [
-    {name = "Contractor-Bot Contributors"}
+    {name = "Atlas-Bot Contributors"}
 ]
 keywords = ["telegram", "construction", "contractor", "daily-report", "labor", "excel", "pdf"]
 classifiers = [
@@ -30,8 +30,8 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "python-dotenv>=1.0,<2.0",
     "pandas>=2.0,<3.0",
-    # V1 Excel stack above. V2 adds LibreOffice path (TBD, see docs).
-    # Atlas opencode-serve agent dep TBD in last ticket - do not add yet.
+    # Excel stack above (Windows-only PDF). LibreOffice path roadmap (see docs).
+    # Atlas opencode-serve agent dep TBD - do not add yet.
 ]
 
 [project.optional-dependencies]
@@ -45,7 +45,8 @@ postgres = [
 ]
 
 [project.scripts]
-contractor-bot = "main:main"
+atlas-bot = "main:main"
+contractor-bot = "main:main"  # legacy alias
 
 [project.urls]
 Homepage = "https://github.com/mventor-git/contractor-bot"
