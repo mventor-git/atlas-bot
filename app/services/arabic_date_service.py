@@ -29,6 +29,17 @@ _ENGLISH_DAY_NAMES: dict[int, str] = {
     6: "Sunday",
 }
 
+# Arabic day names indexed by Python weekday() (0=Monday, 6=Sunday).
+_ARABIC_DAY_NAMES: dict[int, str] = {
+    0: "الاثنين",      # Monday
+    1: "الثلاثاء",     # Tuesday
+    2: "الأربعاء",     # Wednesday
+    3: "الخميس",       # Thursday
+    4: "الجمعة",       # Friday
+    5: "السبت",        # Saturday
+    6: "الأحد",        # Sunday
+}
+
 # Default reporting window (used when config not provided)
 DEFAULT_WINDOW_START = time(9, 0)
 DEFAULT_WINDOW_END = time(14, 0)
