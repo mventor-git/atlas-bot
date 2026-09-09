@@ -15,9 +15,9 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import openpyxl
 import pytest
 
+from tests.conftest import make_tables_ods
 from app.database.manager import DatabaseManager
 from app.models.config import AppConfig
 from app.models.database import (
@@ -34,33 +34,21 @@ from app.services.smart_suggestion_service import SmartSuggestionService
 
 
 def create_test_tables(file_path: Path) -> None:
-    """Create a minimal test tables.xlsx file with known contractors."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "tblContractor"
-    ws["A1"] = "Contractor"
-    ws["B1"] = "Type"
-    contractors = [
-        ("Civil Works Company", "Civil"),
-        ("Electrical Solutions Ltd", "Electrical"),
-        ("Plumbing Masters", "Plumbing"),
-        ("Steel Fabricators", "Steel"),
-        ("Painters Pro", "Painting"),
-        ("General Contracting Co", "General"),
-        ("HVAC Experts", "HVAC"),
-        ("Landscaping Services", "Landscaping"),
-    ]
-    for i, (name, ctype) in enumerate(contractors, 2):
-        ws.cell(row=i, column=1, value=name)
-        ws.cell(row=i, column=2, value=ctype)
-
-    ws_zones = wb.create_sheet("tblZones")
-    ws_zones["A1"] = "Zone"
-    for i, zone in enumerate(["Zone A", "Zone B", "Zone C"], 2):
-        ws_zones.cell(row=i, column=1, value=zone)
-
-    wb.save(str(file_path))
-    wb.close()
+    """Create a minimal test tables.ods file with known contractors."""
+    make_tables_ods(
+        file_path,
+        [
+            ("Civil Works Company", "Civil"),
+            ("Electrical Solutions Ltd", "Electrical"),
+            ("Plumbing Masters", "Plumbing"),
+            ("Steel Fabricators", "Steel"),
+            ("Painters Pro", "Painting"),
+            ("General Contracting Co", "General"),
+            ("HVAC Experts", "HVAC"),
+            ("Landscaping Services", "Landscaping"),
+        ],
+        ["Zone A", "Zone B", "Zone C"],
+    )
 
 
 class TestSmartSuggestionService:
@@ -80,7 +68,7 @@ class TestSmartSuggestionService:
     @pytest.fixture
     def tables_path(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            path = Path(tmp_dir) / "tables.xlsx"
+            path = Path(tmp_dir) / "tables.ods"
             create_test_tables(path)
             yield path
 
@@ -88,12 +76,12 @@ class TestSmartSuggestionService:
     def config(self, tables_path: Path):
         """Create AppConfig pointing to the test tables file."""
         return AppConfig(**{
-            "template": {"file": "t.xlsx", "tables_file": str(tables_path)},
+            "template": {"file": "t.ods", "tables_file": str(tables_path)},
             "date": {"cell": "B4", "day_cell": "D4"},
             "table": {"start_row": 12, "columns": {"serial": "A", "contractor": "B", "type": "C", "zone": "D", "workers": "E", "details": "F"}},
-            "output": {"pdf_folder": "exports", "excel_folder": "exports"},
+            "output": {"pdf_folder": "exports", "docs_folder": "exports"},
             "database": {"path": "test.db"},
-            "history": {"file": "h.xlsx"},
+            "history": {"file": "h.ods"},
             "logging": {"file": "l.log", "level": "INFO", "max_bytes": 1024, "backup_count": 1},
             "tables": {"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
             "suggestions": {"max_suggestions": 10, "recent_days": 30, "frequent_limit": 5},

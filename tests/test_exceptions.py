@@ -83,8 +83,8 @@ class TestSpecificExceptions:
     def test_pdf_error_user_message(self):
         """Should provide PDF-specific user message."""
         error = PDFError("PDF issue")
-        assert "excel is installed" in error.user_message.lower(), (
-            f"Expected 'excel is installed' in user_message, "
+        assert "libreoffice is installed" in error.user_message.lower(), (
+            f"Expected 'libreoffice is installed' in user_message, "
             f"got '{error.user_message}'"
         )
 

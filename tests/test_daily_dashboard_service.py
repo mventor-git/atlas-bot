@@ -37,7 +37,7 @@ def make_config(**overrides) -> AppConfig:
         "template": {"file": "t.xlsx", "tables_file": "database/tables.xlsx"},
         "date": {"cell": "B4", "day_cell": "D4"},
         "table": {"start_row": 12, "columns": {"serial": "A", "contractor": "B", "type": "C", "zone": "D", "workers": "E", "details": "F"}},
-        "output": {"pdf_folder": "exports", "excel_folder": "exports"},
+        "output": {"pdf_folder": "exports", "docs_folder": "exports"},
         "database": {"path": "test.db"},
         "history": {"file": "h.xlsx"},
         "logging": {"file": "l.log", "level": "INFO", "max_bytes": 1024, "backup_count": 1},

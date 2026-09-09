@@ -34,7 +34,7 @@ def _make_config(
             "serial": "A", "contractor": "B", "type": "C",
             "zone": "D", "workers": "E", "details": "F",
         }},
-        output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+        output={"pdf_folder": "exports/pdf", "docs_folder": "exports/excel"},
         database={"path": ":memory:"},
         session=SessionConfig(
             timeout_minutes=timeout_minutes,

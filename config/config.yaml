@@ -1,32 +1,32 @@
 # Atlas-Bot Configuration
 # ========================
-# All Excel cell positions and paths are configured here.
+# All template cell positions and paths are configured here.
 # Changing the template requires editing ONLY this file.
-# LibreOffice headless path is roadmap alongside Excel.
+# LibreOffice headless renders PDFs from the same templates.
 
 # Template settings
 template:
   # Path to the tables workbook containing contractor and zone data
-  tables_file: "database/tables.xlsx"
+  tables_file: "database/tables.ods"
 
   # Multi-template system: auto-selects based on row count
-  small_template: "templates/small_template.xlsx"     # Up to 7 rows
-  medium_template: "templates/medium_template.xlsx"   # 8-20 rows
-  large_template: "templates/large_template.xlsx"     # 21+ rows
+  small_template: "templates/small_template.ots"     # Up to 7 rows
+  medium_template: "templates/medium_template.ots"   # 8-20 rows
+  large_template: "templates/large_template.ots"     # 21+ rows
   row_thresholds:
     medium: 7    # Switch to medium_template when rows > this
     large: 20    # Switch to large_template when rows > this
 
   # Empty day template (for days with no labor)
-  empty_day_template: "templates/empty-day.xlsx"
+  empty_day_template: "templates/empty-day.ots"
 
   # Contractor period report template
-  contractor_report_template: "templates/contractor_report_template.xlsx"
+  contractor_report_template: "templates/contractor_report_template.ots"
 
   # Legacy template (used as fallback if new templates don't exist)
-  file: "templates/small_template.xlsx"
+  file: "templates/small_template.ots"
 
-# Cell mappings (Excel cell references)
+# Cell mappings (spreadsheet cell references)
 # Date and Day cells
 date:
   cell: "B7"       # Date — merged B7:C7; has TODAY() formula (preserved automatically)
@@ -49,7 +49,7 @@ table:
 # Output paths
 output:
   pdf_folder: "exports/pdf"
-  excel_folder: "exports/excel"
+  docs_folder: "exports/docs"
   preview_folder: "exports/preview"
   pdf_database: "exports/pdf_database"  # Centralized PDF archive for all finalized reports
 
@@ -57,9 +57,9 @@ output:
 database:
   path: "database/atlas_bot.db"
 
-# History Excel file
+# History file
 history:
-  file: "database/history.xlsx"
+  file: "database/history.ods"
 
 # Logging
 logging:
@@ -109,14 +109,13 @@ dashboard:
 
 # Timezone & Calendar (for scheduling notifications, business hours, and holiday enforcement)
 timezone:
-  name: "Africa/Cairo"  # Egypt (UTC+2) — matches local machine timezone
+  name: "Africa/Cairo"  # Egypt (UTC+2) - set your timezone
   holidays_and_friday: "enabled"  # "enabled" = auto-create empty PDFs on holidays/Friday, "disabled" = treat as normal working days
 
-# Authorization (v3.0)
+# Authorization
 auth:
-  superadmin: "7830528991"       # Telegram user ID with super admin privileges
-  admins:                        # Additional admin user IDs
-    - "5252295448"               # User active 10-11am July 13 2026
+  superadmin: "0000000000"       # Telegram user ID with super admin privileges (set yours)
+  admins: []                     # Additional admin user IDs
 
 # Notification schedule
 notification:
@@ -129,6 +128,6 @@ notification:
   afternoon_reminder_minute: 0
   auto_no_report_hour: 17            # 5 PM - auto-create no_report entry
   auto_no_report_minute: 0
-  empty_template_file: "templates/empty-day.xlsx"  # Template for empty days
+  empty_template_file: "templates/empty-day.ots"  # Template for empty days
   check_interval_seconds: 30         # How often to check the time
   send_to_admin_only: false          # Send notifications to all users or only admins

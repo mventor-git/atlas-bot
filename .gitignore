@@ -31,26 +31,26 @@ Thumbs.db
 
 # Project-specific exports (generated, never commit)
 exports/pdf/*
-exports/excel/*
+exports/docs/*
 exports/preview/*
 exports/pdf_database/*
 !exports/pdf/.gitkeep
-!exports/excel/.gitkeep
+!exports/docs/.gitkeep
 !exports/preview/.gitkeep
 !exports/pdf_database/.gitkeep
 
 # Database (clean start - no data files in repo)
 database/*.db
-database/*.xlsx
+database/*.ods
 !database/.gitkeep
+!database/tables.ods
 
 # Logs
 logs/*.log
 !logs/.gitkeep
 
-# Excel COM temporary files
-~$*.xlsx
-*.xlsx.*
+# LibreOffice lock files
+.~lock.*#
 
 # Private - never commit (local AI/working data)
 .env

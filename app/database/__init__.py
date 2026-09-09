@@ -4,9 +4,9 @@ SQLite database with repository pattern for data access.
 """
 
 from app.database.manager import DatabaseManager
-from app.database.history_service import HistoryExcelService
+from app.database.history_service import HistoryService
 
 __all__ = [
     "DatabaseManager",
-    "HistoryExcelService",
+    "HistoryService",
 ]

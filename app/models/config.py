@@ -37,13 +37,13 @@ class OutputConfig(BaseModel):
     """Output path configuration for generated files."""
 
     pdf_folder: str = Field("exports/pdf", description="Folder for generated PDF files")
-    excel_folder: str = Field("exports/excel", description="Folder for generated Excel files")
+    docs_folder: str = Field("exports/docs", description="Folder for generated document files")
     preview_folder: str = Field("exports/preview", description="Folder for preview PDF files")
     pdf_database: str = Field("exports/pdf_database", description="Centralized PDF archive directory")
 
 
 class TableColumnConfig(BaseModel):
-    """Column mapping for the labor table in the Excel template.
+    """Column mapping for the labor table in the document template.
 
     NOTE: Column A is unusable in the template, so serial starts at B.
     Columns map to the tblReport headers:
@@ -74,7 +74,7 @@ class TemplateThresholdsConfig(BaseModel):
 
 
 class TemplateConfig(BaseModel):
-    """Configuration for the Excel template file and its cell mappings.
+    """Configuration for the document template file and its cell mappings.
 
     Multi-template system auto-selects the appropriate template based on
     the number of data rows:
@@ -83,13 +83,13 @@ class TemplateConfig(BaseModel):
     - large_template: beyond ``row_thresholds.large`` rows
     """
 
-    file: str = Field("templates/small_template.xlsx", description="Path to the Excel template (legacy/fallback)")
-    tables_file: str = Field("database/tables.xlsx", description="Path to the tables workbook")
-    small_template: str = Field("templates/small_template.xlsx", description="Small template (up to 7 rows)")
-    medium_template: str = Field("templates/medium_template.xlsx", description="Medium template (8-20 rows)")
-    large_template: str = Field("templates/large_template.xlsx", description="Large template (21+ rows)")
-    empty_day_template: str = Field("templates/empty-day.xlsx", description="Template for days with no labor")
-    contractor_report_template: str = Field("templates/contractor_report_template.xlsx", description="Template for contractor period reports")
+    file: str = Field("templates/small_template.ots", description="Path to the document template (fallback)")
+    tables_file: str = Field("database/tables.ods", description="Path to the tables file")
+    small_template: str = Field("templates/small_template.ots", description="Small template (up to 7 rows)")
+    medium_template: str = Field("templates/medium_template.ots", description="Medium template (8-20 rows)")
+    large_template: str = Field("templates/large_template.ots", description="Large template (21+ rows)")
+    empty_day_template: str = Field("templates/empty-day.ots", description="Template for days with no labor")
+    contractor_report_template: str = Field("templates/contractor_report_template.ots", description="Template for contractor period reports")
     row_thresholds: TemplateThresholdsConfig = Field(default_factory=TemplateThresholdsConfig)
 
 
@@ -100,13 +100,13 @@ class DatabaseConfig(BaseModel):
 
 
 class HistoryConfig(BaseModel):
-    """History Excel file configuration."""
+    """History file configuration."""
 
-    file: str = Field("database/history.xlsx", description="Path to history Excel file")
+    file: str = Field("database/history.ods", description="Path to history file")
 
 
 class TablesConfig(BaseModel):
-    """Configuration for sheets in tables.xlsx."""
+    """Configuration for sheets in tables.ods."""
 
     contractor_sheet: str = Field("tblContractor", description="Sheet name for contractors")
     zones_sheet: str = Field("tblZones", description="Sheet name for work zones")
@@ -180,11 +180,11 @@ class DashboardConfig(BaseModel):
 class ProjectConfig(BaseModel):
     """Project/site configuration for PDF filename generation."""
 
-    name: str = Field("elshams", description="Project name used in PDF filenames (DD-MM-YYYY_{name}_labor_report.pdf)")
+    name: str = Field("site", description="Project name used in PDF filenames (DD-MM-YYYY_{name}_labor_report.pdf)")
 
 
 class SuggestionsConfig(BaseModel):
-    """Smart suggestion configuration. (NEW v2.0 â€” mventor-ticket-009)"""
+    """Smart suggestion configuration."""
 
     max_suggestions: int = Field(10, description="Max suggestions to return", ge=1)
     recent_days: int = Field(30, description="Lookback window for recent contractors in days", ge=1)
@@ -227,7 +227,7 @@ class NotificationConfig(BaseModel):
     afternoon_reminder_minute: int = Field(0, description="Minute for afternoon reminder", ge=0, le=59)
     auto_no_report_hour: int = Field(17, description="Hour to auto-create no_report (24h)", ge=0, le=23)
     auto_no_report_minute: int = Field(0, description="Minute for auto no_report generation", ge=0, le=59)
-    empty_template_file: str = Field("templates/empty-day.xlsx", description="Template for empty/no_report days")
+    empty_template_file: str = Field("templates/empty-day.ots", description="Template for empty/no_report days")
     check_interval_seconds: int = Field(30, description="How often to check time (seconds)", ge=10, le=300)
     send_to_admin_only: bool = Field(False, description="If true, only sends notifications to admin users")
 
@@ -345,9 +345,9 @@ class AppConfig(BaseModel):
         return Path(self.output.pdf_folder).resolve()
 
     @property
-    def excel_folder_path(self) -> Path:
-        """Get the resolved Excel output folder path."""
-        return Path(self.output.excel_folder).resolve()
+    def docs_folder_path(self) -> Path:
+        """Get the resolved generated-documents folder path."""
+        return Path(self.output.docs_folder).resolve()
 
     @property
     def preview_folder_path(self) -> Path:

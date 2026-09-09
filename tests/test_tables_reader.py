@@ -14,79 +14,44 @@ import tempfile
 from pathlib import Path
 from typing import Generator
 
-import openpyxl
 import pytest
 
+from odf.opendocument import OpenDocumentSpreadsheet
+from odf.table import Table
+from tests.conftest import make_tables_ods
 from app.models.database import Contractor, Zone
 from app.services.tables_reader import TablesReaderService, TablesReaderError
 
 
 def create_test_tables(file_path: Path) -> None:
-    """Create a test tables.xlsx file with contractor and zone data.
-
-    tblContractor sheet:
-        Row 1: Header (Contractor | Type)
-        Row 2+: Contractor data
-
-    tblZones sheet:
-        Row 1: Header (Zone)
-        Row 2+: Zone data
-
-    Args:
-        file_path: Where to save the test file.
-    """
-    wb = openpyxl.Workbook()
-
-    # --- tblContractor sheet ---
-    ws_contractor = wb.active
-    ws_contractor.title = "tblContractor"
-    ws_contractor["A1"] = "Contractor"
-    ws_contractor["B1"] = "Type"
-
-    contractors = [
-        ("Civil Works Company", "Civil"),
-        ("Electrical Solutions Ltd", "Electrical"),
-        ("Plumbing Masters", "Plumbing"),
-        ("Steel Fabricators Inc", "Steel"),
-        ("Concrete Experts", "Civil"),
-        ("AC Technicians", "Mechanical"),
-        ("Painting Pros", "Finishing"),
-        ("Flooring Specialists", "Finishing"),
-        ("Glass Installers", "Glazing"),
-        ("Landscaping Co", "External"),
-        ("AL BAHR AL AZRAQ", "Civil"),
-        ("شركة الخليج", "Civil"),
-    ]
-    for i, (name, ctype) in enumerate(contractors, 2):
-        ws_contractor.cell(row=i, column=1, value=name)
-        ws_contractor.cell(row=i, column=2, value=ctype)
-
-    # --- tblZones sheet ---
-    ws_zones = wb.create_sheet("tblZones")
-    ws_zones["A1"] = "Zone"
-    zones = [
-        "Zone A", "Zone B", "Zone C", "Zone D",
-        "Ground Floor", "First Floor", "Roof Area",
-        "External Area", "Basement", "Parking",
-    ]
-    for i, zone in enumerate(zones, 2):
-        ws_zones.cell(row=i, column=1, value=zone)
-
-    wb.save(str(file_path))
-    wb.close()
+    """Create a test tables.ods file with contractor and zone data."""
+    make_tables_ods(
+        file_path,
+        [
+            ("Civil Works Company", "Civil"),
+            ("Electrical Solutions Ltd", "Electrical"),
+            ("Plumbing Masters", "Plumbing"),
+            ("Steel Fabricators Inc", "Steel"),
+            ("Concrete Experts", "Civil"),
+            ("AC Technicians", "Mechanical"),
+            ("Painting Pros", "Finishing"),
+            ("Flooring Specialists", "Finishing"),
+            ("Glass Installers", "Glazing"),
+            ("Landscaping Co", "External"),
+            ("AL BAHR AL AZRAQ", "Civil"),
+            ("شركة الخليج", "Civil"),
+        ],
+        [
+            "Zone A", "Zone B", "Zone C", "Zone D",
+            "Ground Floor", "First Floor", "Roof Area",
+            "External Area", "Basement", "Parking",
+        ],
+    )
 
 
 def create_empty_tables(file_path: Path) -> None:
-    """Create a tables.xlsx with empty sheets."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "tblContractor"
-    ws["A1"] = "Contractor"
-    ws["B1"] = "Type"
-
-    wb.create_sheet("tblZones")
-    wb.save(str(file_path))
-    wb.close()
+    """Create a tables.ods with empty sheets."""
+    make_tables_ods(file_path, [], [])
 
 
 class TestTablesReaderService:
@@ -100,15 +65,15 @@ class TestTablesReaderService:
 
     @pytest.fixture
     def tables_path(self, temp_dir: Path) -> Path:
-        """Create a test tables.xlsx file."""
-        path = temp_dir / "tables.xlsx"
+        """Create a test tables.ods file."""
+        path = temp_dir / "tables.ods"
         create_test_tables(path)
         return path
 
     @pytest.fixture
     def empty_tables_path(self, temp_dir: Path) -> Path:
-        """Create an empty tables.xlsx file."""
-        path = temp_dir / "empty.xlsx"
+        """Create an empty tables.ods file."""
+        path = temp_dir / "empty.ods"
         create_empty_tables(path)
         return path
 
@@ -117,13 +82,13 @@ class TestTablesReaderService:
         """Create a minimal config pointing to the test tables."""
         from app.models.config import AppConfig
         return AppConfig(
-            template={"file": "template.xlsx", "tables_file": str(tables_path)},
+            template={"file": "template.ods", "tables_file": str(tables_path)},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
             database={"path": ":memory:"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )
@@ -269,16 +234,16 @@ class TestTablesReaderService:
     # --- Error Handling ---
 
     def test_missing_file(self, temp_dir: Path):
-        """Should raise error when tables.xlsx doesn't exist."""
+        """Should raise error when tables.ods doesn't exist."""
         from app.models.config import AppConfig
         config = AppConfig(
-            template={"file": "t.xlsx", "tables_file": str(temp_dir / "missing.xlsx")},
+            template={"file": "t.ods", "tables_file": str(temp_dir / "missing.ods")},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
         )
         reader = TablesReaderService(config)
         with pytest.raises(TablesReaderError, match="Tables file not found"):
@@ -286,19 +251,19 @@ class TestTablesReaderService:
 
     def test_missing_contractor_sheet(self, temp_dir: Path):
         """Should raise error when tblContractor sheet is missing."""
-        wb = openpyxl.Workbook()
-        wb.save(str(temp_dir / "bad.xlsx"))
-        wb.close()
+        doc = OpenDocumentSpreadsheet()
+        doc.spreadsheet.addElement(Table(name="Other"))
+        doc.save(str(temp_dir / "bad.ods"))
 
         from app.models.config import AppConfig
         config = AppConfig(
-            template={"file": "t.xlsx", "tables_file": str(temp_dir / "bad.xlsx")},
+            template={"file": "t.ods", "tables_file": str(temp_dir / "bad.ods")},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )
         reader = TablesReaderService(config)
@@ -308,21 +273,30 @@ class TestTablesReaderService:
     def test_missing_zones_sheet(self, tables_path: Path, temp_dir: Path):
         """Should raise error when tblZones sheet is missing."""
         # Create file with only contractor sheet
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "tblContractor"
-        wb.save(str(temp_dir / "no_zones.xlsx"))
-        wb.close()
+        from odf.table import TableCell, TableRow
+        from odf.text import P
+        doc = OpenDocumentSpreadsheet()
+        table = Table(name="tblContractor")
+        row = TableRow()
+        for header in ("Contractor", "Type"):
+            cell = TableCell()
+            paragraph = P()
+            paragraph.addText(header)
+            cell.addElement(paragraph)
+            row.addElement(cell)
+        table.addElement(row)
+        doc.spreadsheet.addElement(table)
+        doc.save(str(temp_dir / "no_zones.ods"))
 
         from app.models.config import AppConfig
         config = AppConfig(
-            template={"file": "t.xlsx", "tables_file": str(temp_dir / "no_zones.xlsx")},
+            template={"file": "t.ods", "tables_file": str(temp_dir / "no_zones.ods")},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )
         reader = TablesReaderService(config)
@@ -335,13 +309,13 @@ class TestTablesReaderService:
         """Should handle empty contractor sheet."""
         from app.models.config import AppConfig
         config = AppConfig(
-            template={"file": "t.xlsx", "tables_file": str(empty_tables_path)},
+            template={"file": "t.ods", "tables_file": str(empty_tables_path)},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )
         reader = TablesReaderService(config)
@@ -352,13 +326,13 @@ class TestTablesReaderService:
         """Should handle empty zones sheet."""
         from app.models.config import AppConfig
         config = AppConfig(
-            template={"file": "t.xlsx", "tables_file": str(empty_tables_path)},
+            template={"file": "t.ods", "tables_file": str(empty_tables_path)},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/docs"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )
         reader = TablesReaderService(config)

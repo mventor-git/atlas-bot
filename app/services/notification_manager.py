@@ -498,36 +498,36 @@ class NotificationManager:
             self._repo.add(report)
             logger.info("Auto-created no_report entry for %s", today_str)
 
-            # Generate empty Excel using empty-day.xlsx template if available
-            await self._generate_empty_excel(today_str)
+            # Generate empty document using empty-day.ots template if available
+            await self._generate_empty_doc(today_str)
 
         except DatabaseError:
             logger.info("Report already exists for %s (concurrent creation)", today_str)
         except Exception as e:
             logger.error("Failed to auto-create no_report for %s: %s", today_str, e)
 
-    async def _generate_empty_excel(self, today_str: str) -> None:
-        """Generate an empty Excel file by copying the empty-day.xlsx template.
+    async def _generate_empty_doc(self, today_str: str) -> None:
+        """Generate an empty document file by copying the empty-day.ots template.
 
         Args:
             today_str: Today's date string for the output filename.
         """
         empty_template = Path(self._config.notification.empty_template_file)
         if not empty_template.exists():
-            logger.info("Empty template not found at %s, skipping Excel generation", empty_template)
+            logger.info("Empty template not found at %s, skipping document generation", empty_template)
             return
 
         try:
             import shutil
 
-            output_dir = self._config.excel_folder_path
+            output_dir = self._config.docs_folder_path
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"empty_{today_str}.xlsx"
+            output_path = output_dir / f"empty_{today_str}.ods"
 
             shutil.copy2(str(empty_template), str(output_path))
             logger.info("Copied empty template to %s", output_path)
         except Exception as e:
-            logger.error("Failed to generate empty Excel for %s: %s", today_str, e)
+            logger.error("Failed to generate empty document for %s: %s", today_str, e)
 
 
 # ─── Convenience function ──────────────────────────────────────────

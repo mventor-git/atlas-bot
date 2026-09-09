@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Optional
 
 from app.database.manager import DatabaseManager
-from app.excel.template_filler import TemplateFiller
+from app.libre.filler import TemplateFiller
 from app.models.config import AppConfig
 from app.models.database import Report, ReportStatus
-from app.pdf.generator import PDFGenerator
+from app.libre.pdf import PDFGenerator
 from app.repositories.report_repository import ReportRepository
 from app.services.arabic_date_service import ArabicDateService
 from app.utils.exceptions import DatabaseError, PDFError
@@ -43,7 +43,7 @@ class PdfDatabaseService:
     Usage:
         service = PdfDatabaseService(config, filler, generator, db_manager)
         pdf_path = service.save_finalized_pdf(report)
-        service.import_old_pdfs("D:/DC/Other logs/Labor_Log/.db")
+        service.import_old_pdfs("./pdf-archive")
     """
 
     # Pattern for old-style filenames: Labor_DD-MM-YYYY.pdf
@@ -61,7 +61,7 @@ class PdfDatabaseService:
         Args:
             config: Application configuration (for pdf_database path and project name).
             template_filler: Optional TemplateFiller for generating PDFs from reports.
-            pdf_generator: Optional PDFGenerator for Excel-to-PDF conversion.
+            pdf_generator: Optional PDFGenerator for document-to-PDF conversion.
             db_manager: Optional DatabaseManager for creating DB entries during import.
         """
         self._config = config
@@ -79,13 +79,13 @@ class PdfDatabaseService:
 
         Format: ``{DD-MM-YYYY}_{project_name}_labor_report.pdf``
 
-        Example: ``12-07-2026_elshams_labor_report.pdf``
+        Example: ``12-07-2026_site_labor_report.pdf``
 
         Args:
             date_str: Date in YYYY-MM-DD format.
 
         Returns:
-            Filename string (e.g., '12-07-2026_elshams_labor_report.pdf').
+            Filename string (e.g., '12-07-2026_site_labor_report.pdf').
         """
         try:
             dt = date.fromisoformat(date_str)
@@ -141,16 +141,16 @@ class PdfDatabaseService:
                 )
             elif self._filler and self._generator and report.items:
                 # Generate a new PDF from the report data
-                excel_path = str(
-                    self._config.excel_folder_path / f"{report.date}.xlsx"
+                doc_path = str(
+                    self._config.docs_folder_path / f"{report.date}.ods"
                 )
-                filled_excel = self._filler.fill(report, output_path=excel_path)
-                self._generator.convert_excel_to_pdf(
-                    filled_excel, output_path=str(dest_path),
+                filled_doc = self._filler.fill(report, output_path=doc_path)
+                self._generator.convert_to_pdf(
+                    filled_doc, output_path=str(dest_path),
                 )
                 logger.info(
                     "Generated and archived PDF: %s -> %s",
-                    filled_excel, dest_path,
+                    filled_doc, dest_path,
                 )
             else:
                 # No source and no generation capability — just record the path
