@@ -83,9 +83,9 @@ class TemplateConfig(BaseModel):
     - large_template: beyond ``row_thresholds.large`` rows
     """
 
-    file: str = Field("templates/small_template.ots", description="Path to the document template (fallback)")
+    file: str = Field("templates/contractor-daily-labor-template.ods", description="Path to the document template (fallback)")
     tables_file: str = Field("database/tables.ods", description="Path to the tables file")
-    small_template: str = Field("templates/small_template.ots", description="Small template (up to 7 rows)")
+    small_template: str = Field("templates/contractor-daily-labor-template.ods", description="Small template (up to 7 rows)")
     medium_template: str = Field("templates/medium_template.ots", description="Medium template (8-20 rows)")
     large_template: str = Field("templates/large_template.ots", description="Large template (21+ rows)")
     empty_day_template: str = Field("templates/empty-day.ots", description="Template for days with no labor")

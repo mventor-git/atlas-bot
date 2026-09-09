@@ -417,7 +417,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             await query.edit_message_text("You don't have permission to create reports.")
             return
 
-        day_name = ArabicDateService.get_arabic_day_name(date.today())
+        day_name = ArabicDateService.get_day_name(date.today())
 
         auto_save_service = context.bot_data.get("auto_save_service")
         if auto_save_service:
@@ -465,7 +465,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             return
 
         yesterday = (date.today() - timedelta(days=1)).isoformat()
-        day_name = ArabicDateService.get_arabic_day_name(date.today())
+        day_name = ArabicDateService.get_day_name(date.today())
 
         try:
             one_click_service: OneClickYesterdayService = context.bot_data["one_click_yesterday_service"]

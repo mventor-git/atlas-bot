@@ -24,6 +24,8 @@ def main() -> int:
     ap.add_argument("template", help="Path to .ots file (modified in place)")
     ap.add_argument("--logo", default=None, help="PNG to embed as Pictures/<as>")
     ap.add_argument("--as", dest="as_name", default="logo.png", help="Name under Pictures/")
+    ap.add_argument("--width", default="4.0cm", help="Frame width")
+    ap.add_argument("--height", default="1.38cm", help="Frame height")
     ap.add_argument("--brand-from", default=None)
     ap.add_argument("--brand-to", default=None)
     args = ap.parse_args()
@@ -53,7 +55,7 @@ def main() -> int:
             cell = row.getElementsByType(TableCell)[0]
             p = P()
             frame = Frame(
-                name="Logo", width="3.94cm", height="1.98cm", x="0cm", y="0cm"
+                name="Logo", width=args.width, height=args.height, x="0cm", y="0cm"
             )
             frame.addElement(Image(href="Pictures/" + args.as_name))
             p.addElement(frame)

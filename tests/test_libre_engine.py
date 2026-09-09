@@ -34,9 +34,9 @@ def config():
 
     return AppConfig(
         template={
-            "file": "templates/small_template.ots",
+            "file": "templates/contractor-daily-labor-template.ods",
             "tables_file": "database/tables.ods",
-            "small_template": "templates/small_template.ots",
+            "small_template": "templates/contractor-daily-labor-template.ods",
             "medium_template": "templates/medium_template.ots",
             "large_template": "templates/large_template.ots",
             "empty_day_template": "templates/empty-day.ots",

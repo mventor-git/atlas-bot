@@ -486,7 +486,7 @@ class NotificationManager:
             except (ValueError, TypeError):
                 target_date = now.date()
 
-            day_name = ArabicDateService.get_arabic_day_name(target_date)
+            day_name = ArabicDateService.get_day_name(target_date)
 
             report = Report(
                 date=today_str,
