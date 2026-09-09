@@ -25,7 +25,7 @@ async def new_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     telegram_user = str(update.effective_user.id)
     today = date.today().isoformat()
-    day_name = ArabicDateService.get_arabic_day_name(date.today())
+    day_name = ArabicDateService.get_day_name(date.today())
     suggestion_service: SmartSuggestionService = context.bot_data["suggestion_service"]
     auto_save_service: AutoSaveService = context.bot_data["auto_save_service"]
 
@@ -76,7 +76,7 @@ async def copy_yesterday_command(update: Update, context: ContextTypes.DEFAULT_T
     telegram_user = str(update.effective_user.id)
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
-    day_name = ArabicDateService.get_arabic_day_name(date.today())
+    day_name = ArabicDateService.get_day_name(date.today())
     one_click_service: OneClickYesterdayService = context.bot_data["one_click_yesterday_service"]
     auto_save_service: AutoSaveService = context.bot_data["auto_save_service"]
 

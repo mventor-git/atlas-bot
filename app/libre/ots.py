@@ -91,6 +91,17 @@ def find_row(table: Table, marker: str, start: int = 0) -> int:
     raise ValueError(f"Marker not found in template: {marker!r}")
 
 
+def find_first(table: Table, markers, start: int = 0) -> int:
+    """First row matching any marker (tried in order)."""
+    last_error: ValueError | None = None
+    for marker in markers:
+        try:
+            return find_row(table, marker, start)
+        except ValueError as e:
+            last_error = e
+    raise ValueError(f"No markers found in template: {markers!r}") from last_error
+
+
 def _row_signature(row: TableRow) -> tuple:
     """Style signature of a row: (row style, [cell styles])."""
     cells: list[str | None] = []

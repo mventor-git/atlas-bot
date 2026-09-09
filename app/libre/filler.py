@@ -18,10 +18,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DAY_MARKER = "اليوم"
-DATE_MARKER = "التاريخ"
-HEADER_MARKER = "اسم المقاول"
-TOTALS_MARKER = "الإجمالي"
+DAY_MARKERS = ("Day:", "اليوم")
+DATE_MARKERS = ("Date:", "التاريخ")
+HEADER_MARKERS = ("Contractor", "اسم المقاول")
+TOTALS_MARKERS = ("Total:", "الإجمالي")
 
 # Logical columns B..G (0-based element index after repeat expansion)
 COL_SERIAL, COL_CONTRACTOR, COL_TYPE, COL_ZONE, COL_WORKERS, COL_DETAILS = 1, 2, 3, 4, 5, 6
@@ -47,7 +47,7 @@ class TemplateFiller:
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._template_path = Path("templates/small_template.ots")
+        self._template_path = Path("templates/contractor-daily-labor-template.ods")
 
     def _select_template(self, row_count: int) -> Path:
         return self._config.get_template_for_row_count(row_count)
@@ -106,20 +106,20 @@ class TemplateFiller:
         # Templates without day/date markers (e.g. empty-day) keep content as-is.
         try:
             ots.set_cell_text(
-                self._value_cell(table, ots.find_row(table, DAY_MARKER)), report.day
+                self._value_cell(table, ots.find_first(table, DAY_MARKERS)), report.day
             )
         except ValueError:
             logger.debug("Day marker not in template, skipping")
         try:
             ots.set_cell_text(
-                self._value_cell(table, ots.find_row(table, DATE_MARKER)), report.date
+                self._value_cell(table, ots.find_first(table, DATE_MARKERS)), report.date
             )
         except ValueError:
             logger.debug("Date marker not in template, skipping")
 
     def _fill_items(self, table, items: list) -> int:
-        header_idx = ots.find_row(table, HEADER_MARKER)
-        totals_idx = ots.find_row(table, TOTALS_MARKER, start=header_idx + 1)
+        header_idx = ots.find_first(table, HEADER_MARKERS)
+        totals_idx = ots.find_first(table, TOTALS_MARKERS, start=header_idx + 1)
         slots = list(range(header_idx + 1, totals_idx))
         while len(slots) < len(items):
             new_idx = ots.clone_row_after(table, slots[-1])
@@ -140,8 +140,8 @@ class TemplateFiller:
         return total
 
     def _fill_totals(self, table, total: int) -> None:
-        header_idx = ots.find_row(table, HEADER_MARKER)
-        totals_idx = ots.find_row(table, TOTALS_MARKER, start=header_idx + 1)
+        header_idx = ots.find_first(table, HEADER_MARKERS)
+        totals_idx = ots.find_first(table, TOTALS_MARKERS, start=header_idx + 1)
         cells = ots.logical_cells(
             table.getElementsByType(ots.TableRow)[totals_idx]
         )

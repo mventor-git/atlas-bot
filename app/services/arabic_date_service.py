@@ -16,17 +16,17 @@ from typing import Optional
 # Arabic-Indic digits mapping (Western → Arabic)
 _ARABIC_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
-# Arabic day names indexed by weekday (0=Monday, 6=Sunday in Python)
-# Python's weekday(): 0=Monday, 1=Tuesday, ..., 6=Sunday
-# We need: 0=Sunday, 1=Monday, ..., 6=Saturday for Arabic convention
-_ARABIC_DAY_NAMES: dict[int, str] = {
-    0: "الاثنين",      # Monday
-    1: "الثلاثاء",     # Tuesday
-    2: "الأربعاء",     # Wednesday
-    3: "الخميس",       # Thursday
-    4: "الجمعة",       # Friday
-    5: "السبت",        # Saturday
-    6: "الأحد",        # Sunday
+# English day names indexed by Python weekday() (0=Monday, 6=Sunday).
+# Used for English document templates; the language switch (ar/en)
+# becomes config-driven in the Arabic-templates ticket.
+_ENGLISH_DAY_NAMES: dict[int, str] = {
+    0: "Monday",
+    1: "Tuesday",
+    2: "Wednesday",
+    3: "Thursday",
+    4: "Friday",
+    5: "Saturday",
+    6: "Sunday",
 }
 
 # Default reporting window (used when config not provided)
@@ -135,6 +135,20 @@ class ArabicDateService:
         year = ArabicDateService.to_arabic_digits(f"{date_obj.year:04d}")
 
         return f"{day}{separator}{month}{separator}{year}"
+
+    @staticmethod
+    def get_day_name(date_obj: Optional[date] = None) -> str:
+        """Get the English day name for document templates.
+
+        Args:
+            date_obj: The date. If None, uses today.
+
+        Returns:
+            English day name (e.g., 'Saturday').
+        """
+        if date_obj is None:
+            date_obj = date.today()
+        return _ENGLISH_DAY_NAMES[date_obj.weekday()]
 
     @staticmethod
     def get_arabic_day_name(date_obj: Optional[date] = None) -> str:

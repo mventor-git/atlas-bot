@@ -6,11 +6,11 @@
 
 # Template settings
 template:
-  # Path to the tables workbook containing contractor and zone data
+  # Path to the tables file containing contractor and zone data
   tables_file: "database/tables.ods"
 
   # Multi-template system: auto-selects based on row count
-  small_template: "templates/small_template.ots"     # Up to 7 rows
+  small_template: "templates/contractor-daily-labor-template.ods"     # Up to 7 rows
   medium_template: "templates/medium_template.ots"   # 8-20 rows
   large_template: "templates/large_template.ots"     # 21+ rows
   row_thresholds:
@@ -23,8 +23,8 @@ template:
   # Contractor period report template
   contractor_report_template: "templates/contractor_report_template.ots"
 
-  # Legacy template (used as fallback if new templates don't exist)
-  file: "templates/small_template.ots"
+  # Default template (used as fallback if new templates don't exist)
+  file: "templates/contractor-daily-labor-template.ods"
 
 # Cell mappings (spreadsheet cell references)
 # Date and Day cells
