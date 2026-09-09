@@ -15,9 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import Generator
 
-import openpyxl
 import pytest
 
+from tests.conftest import make_tables_ods
 from app.database.manager import DatabaseManager
 from app.models.config import AppConfig
 from app.models.database import Contractor
@@ -27,28 +27,16 @@ from app.services.tables_reader import TablesReaderService
 
 
 def create_test_tables(file_path: Path) -> None:
-    """Create a minimal test tables.xlsx file."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "tblContractor"
-    ws["A1"] = "Contractor"
-    ws["B1"] = "Type"
-    contractors = [
-        ("Civil Works Company", "Civil"),
-        ("Electrical Solutions Ltd", "Electrical"),
-        ("Plumbing Masters", "Plumbing"),
-    ]
-    for i, (name, ctype) in enumerate(contractors, 2):
-        ws.cell(row=i, column=1, value=name)
-        ws.cell(row=i, column=2, value=ctype)
-
-    ws_zones = wb.create_sheet("tblZones")
-    ws_zones["A1"] = "Zone"
-    for i, zone in enumerate(["Zone A", "Zone B"], 2):
-        ws_zones.cell(row=i, column=1, value=zone)
-
-    wb.save(str(file_path))
-    wb.close()
+    """Create a minimal test tables.ods file."""
+    make_tables_ods(
+        file_path,
+        [
+            ("Civil Works Company", "Civil"),
+            ("Electrical Solutions Ltd", "Electrical"),
+            ("Plumbing Masters", "Plumbing"),
+        ],
+        ["Zone A", "Zone B"],
+    )
 
 
 class TestContractorSearchService:
@@ -62,8 +50,8 @@ class TestContractorSearchService:
 
     @pytest.fixture
     def tables_path(self, temp_dir: Path) -> Path:
-        """Create a test tables.xlsx file."""
-        path = temp_dir / "tables.xlsx"
+        """Create a test tables.ods file."""
+        path = temp_dir / "tables.ods"
         create_test_tables(path)
         return path
 
@@ -71,13 +59,13 @@ class TestContractorSearchService:
     def config(self, tables_path: Path) -> AppConfig:
         """Create a minimal config."""
         return AppConfig(
-            template={"file": "template.xlsx", "tables_file": str(tables_path)},
+            template={"file": "template.ods", "tables_file": str(tables_path)},
             date={"cell": "B4", "day_cell": "D4"},
             table={"start_row": 12, "columns": {
                 "serial": "A", "contractor": "B", "type": "C",
                 "zone": "D", "workers": "E", "details": "F",
             }},
-            output={"pdf_folder": "exports/pdf", "excel_folder": "exports/excel"},
+            output={"pdf_folder": "exports/pdf", "docs_folder": "exports/excel"},
             database={"path": ":memory:"},
             tables={"contractor_sheet": "tblContractor", "zones_sheet": "tblZones"},
         )

@@ -2,7 +2,7 @@
 Contractor-Bot Application Entry Point.
 
 A Telegram-based construction daily labor tracker with period
-contractor reports. V1 uses Excel templates, V2 moves to LibreOffice.
+contractor reports. Templates are LibreOffice-native (.ots).
 
 Usage:
     python main.py              # Start the bot
@@ -49,8 +49,8 @@ from app.services.arabic_date_service import ArabicDateService
 from app.services.validation_service import ValidationService
 from app.services.add_contractor_service import AddContractorService
 from app.services.audit_service import AuditService
-from app.excel.template_filler import TemplateFiller
-from app.pdf.generator import PDFGenerator
+from app.libre.filler import TemplateFiller
+from app.libre.pdf import PDFGenerator
 from app.services.pdf_preview_service import PDFPreviewService
 from app.bot import create_bot_app
 from app.repositories.user_repository import UserRepository
@@ -116,7 +116,7 @@ def run_health_check(config) -> bool:
     # Check directories (create if needed)
     dirs = [
         ("PDF output", config.pdf_folder_path),
-        ("Excel output", config.excel_folder_path),
+        ("Documents output", config.docs_folder_path),
         ("Preview output", config.preview_folder_path),
         ("Database", config.database_path.parent),
         ("Logs", Path(config.logging.file).parent),
@@ -192,7 +192,7 @@ def main() -> None:
 
         # Ensure output directories exist
         config.pdf_folder_path.mkdir(parents=True, exist_ok=True)
-        config.excel_folder_path.mkdir(parents=True, exist_ok=True)
+        config.docs_folder_path.mkdir(parents=True, exist_ok=True)
         config.preview_folder_path.mkdir(parents=True, exist_ok=True)
         config.database_path.parent.mkdir(parents=True, exist_ok=True)
 

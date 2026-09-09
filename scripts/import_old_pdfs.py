@@ -3,14 +3,14 @@ Old PDF Importer — Import legacy PDFs into the pdf_database archive.
 
 Usage:
     python scripts/import_old_pdfs.py                          # Import with defaults
-    python scripts/import_old_pdfs.py --source "D:\\DC\\Other logs\\Labor_Log\\.db"
+    python scripts/import_old_pdfs.py --source "./pdf-archive"
     python scripts/import_old_pdfs.py --dry-run                 # Preview only, no changes
     python scripts/import_old_pdfs.py --help                    # Show help
 
 This script scans the specified source directory for old-style PDF files
 named ``Labor_DD-MM-YYYY.pdf``, copies them to the configured
 ``pdf_database`` directory with the new standardized naming
-(``DD-MM-YYYY_elshams_labor_report.pdf``), and creates database entries
+(``DD-MM-YYYY_<project>_labor_report.pdf``), and creates database entries
 so the search function can find them by date.
 
 Requires the project to be fully configured (config.yaml, database, etc.).
@@ -39,15 +39,15 @@ def parse_args() -> argparse.Namespace:
         epilog=(
             "Examples:\n"
             "  python scripts/import_old_pdfs.py\n"
-            '  python scripts/import_old_pdfs.py --source "D:\\\\DC\\\\Other logs\\\\Labor_Log\\\\.db"\n'
+            '  python scripts/import_old_pdfs.py --source "./pdf-archive"\n'
             "  python scripts/import_old_pdfs.py --dry-run\n"
         ),
     )
     parser.add_argument(
         "--source",
         type=str,
-        default=r"D:\DC\Other logs\Labor_Log\.db",
-        help="Source directory containing old PDF files (default: D:\\DC\\Other logs\\Labor_Log\\.db)",
+        default="./pdf-archive",
+        help="Source directory containing old PDF files (default: ./pdf-archive)",
     )
     parser.add_argument(
         "--dry-run",

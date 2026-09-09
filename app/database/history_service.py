@@ -1,7 +1,6 @@
-"""
-History Excel service for Labor-Report.
+"""History service for Atlas-Bot (LibreOffice-native, odfpy).
 
-Maintains a history.xlsx file as a secondary record of all reports.
+Maintains a history.ods file as a secondary record of all reports.
 This allows quick viewing of report history without querying SQLite.
 """
 
@@ -9,92 +8,90 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from odf.opendocument import OpenDocumentSpreadsheet, load
+from odf.table import Table, TableCell, TableRow
+from odf.text import P
+
 from app.models.database import Report, ReportStatus
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Headers for the history Excel file
-HISTORY_HEADERS = ["Date", "Day", "Status", "PDF", "Excel", "Created At"]
+# Headers for the history file
+HISTORY_HEADERS = ["Date", "Day", "Status", "PDF", "Document", "Created At"]
 
 
-class HistoryExcelService:
-    """Service for maintaining the history.xlsx report registry.
+def _cell_text(cell) -> str:
+    return "/".join(
+        "".join(str(n) for n in p.childNodes if n.nodeType == 3)
+        for p in cell.getElementsByType(P)
+    )
 
-    Appends a row to history.xlsx for every report action
-    (generated or no_report).
 
-    This is a secondary record alongside the SQLite database,
-    providing easy Excel-based browsing of report history.
+def _append_row(table, values: list) -> None:
+    row = TableRow()
+    for value in values:
+        cell = TableCell()
+        p = P()
+        p.addText("" if value is None else str(value))
+        cell.addElement(p)
+        row.addElement(cell)
+    table.addElement(row)
 
-    The file is created with headers if it doesn't exist.
+
+class HistoryService:
+    """Service for maintaining the history.ods report registry.
+
+    Appends a row to history.ods for every report action
+    (generated or no_report). This is a secondary record alongside
+    the SQLite database. The file is created with headers if needed.
     """
 
     def __init__(self, history_path: str | Path) -> None:
         """Initialize the history service.
 
         Args:
-            history_path: Path to the history.xlsx file.
+            history_path: Path to the history.ods file.
         """
         self._history_path = Path(history_path).resolve()
         self._history_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.debug("HistoryExcelService initialized: %s", self._history_path)
+        logger.debug("HistoryService initialized: %s", self._history_path)
 
     @property
     def history_path(self) -> Path:
         """Get the path to the history file."""
         return self._history_path
 
-    def register_report(self, report: Report, pdf_path: Optional[str] = None, excel_path: Optional[str] = None) -> None:
-        """Register a report in the history Excel file.
-
-        Appends a row with report metadata.
+    def register_report(self, report: Report, pdf_path: Optional[str] = None, doc_path: Optional[str] = None) -> None:
+        """Register a report in the history file.
 
         Args:
             report: The report to register.
             pdf_path: Path to the generated PDF (optional).
-            excel_path: Path to the generated Excel (optional).
-
-        Raises:
-            DatabaseError: If writing to the history file fails.
+            doc_path: Path to the generated document (optional).
         """
         try:
-            import openpyxl
-        except ImportError:
-            logger.warning("openpyxl not available; history.xlsx will not be updated.")
-            return
-
-        try:
-            # Open or create workbook
             if self._history_path.exists():
-                wb = openpyxl.load_workbook(self._history_path)
-                ws = wb.active
+                doc = load(str(self._history_path))
+                table = doc.getElementsByType(Table)[0]
             else:
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                if ws is not None:
-                    ws.title = "History"
-                    ws.append(HISTORY_HEADERS)
+                doc = OpenDocumentSpreadsheet()
+                table = Table(name="History")
+                doc.spreadsheet.addElement(table)
+                _append_row(table, HISTORY_HEADERS)
 
-            if ws is None:
-                raise DatabaseError("Failed to get active worksheet in history file.")
-
-            # Append row
             status_label = "Generated" if report.status == ReportStatus.GENERATED else "No Report"
-            ws.append([
+            _append_row(table, [
                 report.date,
                 report.day,
                 status_label,
                 pdf_path or "",
-                excel_path or "",
+                doc_path or "",
                 report.created_at or datetime.now().isoformat(),
             ])
-
-            wb.save(str(self._history_path))
-            wb.close()
+            doc.save(str(self._history_path))
             logger.info("History updated: date=%s, status=%s", report.date, status_label)
-
         except Exception as e:
             raise DatabaseError(
                 f"Failed to update history file: {e}",
@@ -102,46 +99,26 @@ class HistoryExcelService:
             ) from e
 
     def get_history(self) -> list[dict]:
-        """Read all history entries from the Excel file.
-
-        Returns:
-            List of dictionaries with history entries.
-
-        Raises:
-            DatabaseError: If reading the history file fails.
-        """
-        try:
-            import openpyxl
-        except ImportError:
-            logger.warning("openpyxl not available; cannot read history.")
-            return []
-
+        """Read all history entries from the file."""
         if not self._history_path.exists():
             return []
-
         try:
-            wb = openpyxl.load_workbook(self._history_path, read_only=True)
-            ws = wb.active
-            if ws is None:
-                return []
-
-            rows = list(ws.iter_rows(values_only=True))
+            doc = load(str(self._history_path))
+            table = doc.getElementsByType(Table)[0]
+            rows = []
+            for row in table.getElementsByType(TableRow):
+                vals = []
+                for cell in row.getElementsByType(TableCell):
+                    reps = int(cell.getAttribute("numbercolumnsrepeated") or 1)
+                    vals.extend([_cell_text(cell)] * reps)
+                rows.append(vals)
             if not rows:
                 return []
-
-            # First row is headers
-            headers = [str(h) if h else "" for h in rows[0]]
-            result = []
-            for row in rows[1:]:
-                entry = {}
-                for i, value in enumerate(row):
-                    if i < len(headers):
-                        entry[headers[i]] = value
-                result.append(entry)
-
-            wb.close()
-            return result
-
+            headers = [h or "" for h in rows[0]]
+            return [
+                {headers[i]: v for i, v in enumerate(r) if i < len(headers)}
+                for r in rows[1:]
+            ]
         except Exception as e:
             raise DatabaseError(
                 f"Failed to read history file: {e}",

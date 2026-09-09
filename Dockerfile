@@ -1,8 +1,14 @@
-# Atlas-Bot (bot runs anywhere, PDF-via-Excel needs Windows host)
+# Atlas-Bot (PDF via headless soffice, works on host and container)
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+# PDF engine: headless LibreOffice Writer (slim, no recommends).
+# NOTE: unvalidated (no Docker daemon at build time) - verify on first build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

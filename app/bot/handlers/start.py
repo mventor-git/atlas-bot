@@ -1106,15 +1106,15 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
             })
 
         # Generate PDF using the contractor report template
-        from app.excel.contractor_report_filler import ContractorReportFiller
-        from app.pdf.generator import PDFGenerator
+        from app.libre.contractor_report import ContractorReportFiller
+        from app.libre.pdf import PDFGenerator
 
         config = context.bot_data["app_config"]
         filler = ContractorReportFiller(config.contractor_report_template_path)
 
         # Generate a unique output filename
         safe_name = contractor_name.replace(" ", "_").replace("/", "_")
-        excel_output = config.excel_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.xlsx"
+        doc_output = config.docs_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.ods"
         pdf_output = config.pdf_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.pdf"
 
         filler.fill(
@@ -1122,12 +1122,12 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
             start_date=str(start_date),
             end_date=str(end_date),
             entries=template_entries,
-            output_path=excel_output,
+            output_path=doc_output,
         )
 
         # Convert to PDF
         pdf_gen = PDFGenerator(config)
-        pdf_gen.convert_excel_to_pdf(str(excel_output), str(pdf_output))
+        pdf_gen.convert_to_pdf(str(doc_output), str(pdf_output))
 
         # Send the consolidated PDF
         from telegram import InputFile
@@ -1147,9 +1147,9 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
         else:
             pdf_sent = False
 
-        # Clean up the intermediate Excel file
+        # Clean up the intermediate document file
         try:
-            excel_output.unlink()
+            doc_output.unlink()
         except Exception:
             pass
 
@@ -1268,8 +1268,8 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
             })
 
         # Generate PDF using the contractor report template
-        from app.excel.contractor_report_filler import ContractorReportFiller
-        from app.pdf.generator import PDFGenerator
+        from app.libre.contractor_report import ContractorReportFiller
+        from app.libre.pdf import PDFGenerator
         from telegram import InputFile
 
         config = context.bot_data["app_config"]
@@ -1277,7 +1277,7 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
 
         # Generate output files
         safe_name = contractor_name.replace(" ", "_").replace("/", "_")
-        excel_output = config.excel_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.xlsx"
+        doc_output = config.docs_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.ods"
         pdf_output = config.pdf_folder_path / f"Contractor_{safe_name}_{start_date}_to_{end_date}.pdf"
 
         filler.fill(
@@ -1285,12 +1285,12 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
             start_date=str(start_date),
             end_date=str(end_date),
             entries=template_entries,
-            output_path=excel_output,
+            output_path=doc_output,
         )
 
         # Convert to PDF
         pdf_gen = PDFGenerator(config)
-        pdf_gen.convert_excel_to_pdf(str(excel_output), str(pdf_output))
+        pdf_gen.convert_to_pdf(str(doc_output), str(pdf_output))
 
         # Send the consolidated PDF
         if pdf_output.exists():
@@ -1307,9 +1307,9 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
         else:
             await update.message.reply_text("Failed to generate PDF. Please try again.")
 
-        # Clean up the intermediate Excel file
+        # Clean up the intermediate document file
         try:
-            excel_output.unlink()
+            doc_output.unlink()
         except Exception:
             pass
 

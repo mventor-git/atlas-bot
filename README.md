@@ -10,16 +10,13 @@
 
 ## Stack
 
-- **Docs now: Microsoft Excel** - `openpyxl` template fill + `pywin32` Excel COM pixel-perfect PDF (Windows-only). Example templates in `templates/`, cell map in `config/config.yaml`. Templates are sacred: fill cells only.
-- **Roadmap: LibreOffice** - headless convert replaces Excel COM for cross-platform PDF (unlocks Docker PDF). Excel stays as fallback.
+- **Docs: LibreOffice-native** - `.ots` templates filled with `odfpy`, PDFs rendered by headless `soffice`. Templates live in `templates/`, cell map in `config/config.yaml`. Templates are sacred: fill cells only. System requirement: LibreOffice Still + `soffice` on PATH.
 - **DB:** SQLite local (`database/atlas_bot.db`, gitignored) -> Postgres (multi-site isolation). `DATABASE_URL` in `.env`.
 - **Bot:** `python-telegram-bot` v21, Telegram-only UI. Python 3.12+.
 
 ## Multi-site
 
-Single bot, isolated per site (`site_id` on every row). Day-1 sites: `15 - Nady ElShams`, `00 - Administration (HQ)`. No cross-site views.
-
-Single bot, isolated per site (`site_id` on every row). Day-1 sites: `15 - Nady ElShams`, `00 - Administration (HQ)`. No cross-site views.
+Single bot, isolated per site (`site_id` on every row). Ships with two demo sites out of the box - rename them in `config.yaml` for your deployment. No cross-site views.
 
 | Role | Perms (own site) |
 | Site Engineer | view/edit/create/report/approve |
@@ -31,8 +28,8 @@ Single bot, isolated per site (`site_id` on every row). Day-1 sites: `15 - Nady 
 ## Quick Start
 
 ```bash
-git clone https://github.com/mventor-git/contractor-bot.git
-cd contractor-bot
+git clone https://github.com/mventor-git/atlas-bot.git
+cd atlas-bot
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
@@ -49,36 +46,31 @@ docker compose up -d --build
 docker compose logs -f bot
 ```
 
-- Services: `bot` (python:3.12-slim) + `db` (postgres:16-alpine, data in `pgdata` volume).
-- Limit: V1 PDF-via-Excel COM needs Windows + Excel, so PDF export runs on host only. Everything else (reports, Excel fill via openpyxl, Telegram) works in the container. The LibreOffice ticket removes this gap.
+- Services: `bot` (python:3.12-slim + LibreOffice Writer) + `db` (postgres:16-alpine, data in `pgdata` volume).
+- PDF runs via headless `soffice`, identical on host and in the container.
 
 ## Project Structure
 
 ```
 atlas-bot/
-├── app/            # bot/config/database/excel/models/pdf/repositories/services/utils/workflow
+├── app/            # bot/config/database/libre/models/pdf/repositories/services/utils
 ├── config/         # config.yaml (cell map) + egypt_holidays.json
-├── templates/      # sacred Excel templates (small/medium/large/empty-day/contractor_report)
-├── database/       # empty at clone (gitignored .db); Postgres target
-├── exports/        # generated pdf/excel/preview (gitignored)
+├── templates/      # sacred .ots templates (small/medium/large/empty-day/contractor_report)
+├── database/       # tables.ods skeleton tracked; .db gitignored; Postgres target
+├── exports/        # generated pdf/docs/preview (gitignored)
 ├── logs/           # app logs (gitignored)
 ├── scripts/        # maintenance utilities
 ├── tests/          # pytest suite
 └── main.py
 ```
 
-Private folders (`tickets/`, `profile.md`, `.muse`, `.mventor`, vision data) stay local via `.gitignore`.
-
 ## Docs
 
-- `profile.md` (local) - project identity, full spec
-- `docs/PROJECT_STATE.md` - current status
-- `docs/HANDOVER.md` - session continuation
-- Legacy frozen at `D:\Projects\stable\Labor-Report` (read-only reference, never modify).
+This README is the full public spec. AI working files (`tickets/`, `docs/`, `profile.md`) are gitignored by design and never committed.
 
 ## Brand
 
-Atlas-Bot. This public repo is company-free opensource. The Opal Construction fork applies the Atlas mini-logo + footer `Atlas Powered by Opal - Working Project <SITE>` on every doc it produces.
+Atlas-Bot. This public repo is company-free opensource. Forks apply their own mini-logo + footer (`Atlas Powered by <Company> - Working Project <SITE>`) on produced docs.
 
 ## License
 

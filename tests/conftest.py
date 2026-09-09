@@ -9,8 +9,33 @@ from typing import Generator
 import pytest
 import yaml
 
+from odf.opendocument import OpenDocumentSpreadsheet
+from odf.table import Table, TableCell, TableRow
+from odf.text import P
+
 from app.config.loader import ConfigLoader
 from app.utils.logger import setup_logger
+
+
+def make_tables_ods(file_path: Path, contractors: list, zones: list) -> None:
+    """Write a minimal master .ods (tblContractor + tblZones headers + rows)."""
+    doc = OpenDocumentSpreadsheet()
+    for name, headers, rows in (
+        ("tblContractor", ["Contractor", "Type"], contractors),
+        ("tblZones", ["Zone"], [(z,) for z in zones]),
+    ):
+        table = Table(name=name)
+        for values in [headers] + [list(r) for r in rows]:
+            row = TableRow()
+            for value in values:
+                cell = TableCell()
+                p = P()
+                p.addText(value)
+                cell.addElement(p)
+                row.addElement(cell)
+            table.addElement(row)
+        doc.spreadsheet.addElement(table)
+    doc.save(str(file_path))
 
 
 @pytest.fixture(autouse=True)
@@ -26,8 +51,8 @@ def sample_config_dict() -> dict:
     """Provide a minimal valid configuration dictionary."""
     return {
         "template": {
-            "file": "templates/Daily Labor Report.xlsx",
-            "tables_file": "database/tables.xlsx",
+            "file": "templates/report.ots",
+            "tables_file": "database/tables.ods",
         },
         "date": {
             "cell": "B4",
@@ -46,13 +71,13 @@ def sample_config_dict() -> dict:
         },
         "output": {
             "pdf_folder": "exports/pdf",
-            "excel_folder": "exports/excel",
+            "docs_folder": "exports/docs",
         },
         "database": {
             "path": "database/labor_reports.db",
         },
         "history": {
-            "file": "database/history.xlsx",
+            "file": "database/history.ods",
         },
         "logging": {
             "file": "logs/app.log",

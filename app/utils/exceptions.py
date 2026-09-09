@@ -34,7 +34,7 @@ class ConfigurationError(LaborReportError):
 
 
 class TemplateError(LaborReportError):
-    """Raised when there is an issue with the Excel template."""
+    """Raised when there is an issue with the document template."""
 
     @property
     def user_message(self) -> str:
@@ -62,7 +62,15 @@ class PDFError(LaborReportError):
 
     @property
     def user_message(self) -> str:
-        return "An error occurred while generating the PDF. Please ensure Excel is installed."
+        return "An error occurred while generating the PDF. Please ensure LibreOffice is installed."
+
+
+class LibreError(LaborReportError):
+    """Raised when native document handling fails."""
+
+    @property
+    def user_message(self) -> str:
+        return "An error occurred while generating the document file. Please try again."
 
 
 class BotError(LaborReportError):

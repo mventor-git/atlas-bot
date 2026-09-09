@@ -28,7 +28,7 @@ class TestConfigLoader:
         """Should load and validate a valid configuration file."""
         config = ConfigLoader.load(str(temp_config_file))
         assert isinstance(config, AppConfig), f"Expected AppConfig instance, got {type(config).__name__}"
-        assert config.template.file == "templates/Daily Labor Report.xlsx", f"Expected templates/Daily Labor Report.xlsx, got {config.template.file}"
+        assert config.template.file == "templates/report.ots", f"Expected templates/report.ots, got {config.template.file}"
         assert config.date_cell == "B4", f"Expected B4, got {config.date_cell}"
         assert config.day_cell == "D4", f"Expected D4, got {config.day_cell}"
         assert config.table.start_row == 12, f"Expected 12, got {config.table.start_row}"
@@ -137,7 +137,7 @@ class TestConfigLoader:
         config = ConfigLoader.load(str(temp_config_file))
         assert isinstance(config.template_path, Path), f"Expected Path, got {type(config.template_path).__name__}"
         assert isinstance(config.pdf_folder_path, Path), f"Expected Path, got {type(config.pdf_folder_path).__name__}"
-        assert isinstance(config.excel_folder_path, Path), f"Expected Path, got {type(config.excel_folder_path).__name__}"
+        assert isinstance(config.docs_folder_path, Path), f"Expected Path, got {type(config.docs_folder_path).__name__}"
         assert isinstance(config.database_path, Path), f"Expected Path, got {type(config.database_path).__name__}"
 
 

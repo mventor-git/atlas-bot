@@ -73,8 +73,8 @@ class TestFlow13_ContractorReports:
         fixed_today = date(2026, 7, 13)
 
         with (
-            patch("app.excel.contractor_report_filler.ContractorReportFiller") as mock_filler_cls,
-            patch("app.pdf.generator.PDFGenerator") as mock_pdf_cls,
+            patch("app.libre.contractor_report.ContractorReportFiller") as mock_filler_cls,
+            patch("app.libre.pdf.PDFGenerator") as mock_pdf_cls,
             patch("app.bot.handlers.start.date") as mock_date,
         ):
             mock_date.today.return_value = fixed_today
@@ -90,8 +90,8 @@ class TestFlow13_ContractorReports:
 
             # Set up a mock config
             mock_config = MagicMock()
-            mock_config.contractor_report_template_path = Path("templates/contractor_report_template.xlsx")
-            mock_config.excel_folder_path = Path("exports/excel")
+            mock_config.contractor_report_template_path = Path("templates/contractor_report_template.ots")
+            mock_config.docs_folder_path = Path("exports/docs")
             mock_config.pdf_folder_path = Path("exports/pdf")
 
             update = MockHelpers.mock_update(message_text="Test Co")
@@ -110,7 +110,7 @@ class TestFlow13_ContractorReports:
             repo_mock = MagicMock()
             repo_mock.get_by_date.return_value = report
             context.bot_data["report_repository"] = repo_mock
-            context.bot_data["config"] = mock_config
+            context.bot_data["app_config"] = mock_config
 
             await handle_contractor_report_name(update, context)
 
@@ -129,7 +129,7 @@ class TestFlow13_ContractorReports:
 
             # Should have converted to PDF
             mock_pdf_cls.assert_called_once_with(mock_config)
-            mock_pdf_gen.convert_excel_to_pdf.assert_called_once()
+            mock_pdf_gen.convert_to_pdf.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_13d_no_matching_entries(self):
