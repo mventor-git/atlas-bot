@@ -26,13 +26,13 @@ class AuthorizationService:
     """Service for user authorization and role management."""
 
     # All valid roles
-    ADMIN_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin")
-    APPROVED_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "normal_user", "viewer")
-    CAN_FINALIZE_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin")
-    CAN_MANAGE_USERS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin")
+    ADMIN_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr")
+    APPROVED_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user", "viewer")
+    CAN_FINALIZE_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr")
+    CAN_MANAGE_USERS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr")
     CAN_PROMOTE_ROLES = ("superadmin", "project_manager")
-    CAN_CREATE_REPORTS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "normal_user")
-    CAN_VIEW_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "normal_user", "viewer")
+    CAN_CREATE_REPORTS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user")
+    CAN_VIEW_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user", "viewer")
 
     def __init__(self, user_repo: UserRepository,
                  super_admin_chat_id: str = "",
@@ -61,7 +61,7 @@ class AuthorizationService:
             chat_id: Telegram chat ID.
 
         Returns:
-            Role string: 'superadmin', 'project_manager', 'executive_engineer', 'admin', 'normal_user', 'viewer', 'pending', or 'rejected'.
+            Role string: 'superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', or 'rejected'.
         """
         # Super admin is always superadmin
         if chat_id == self._super_admin_chat_id:
@@ -293,7 +293,7 @@ class AuthorizationService:
         Returns:
             Updated User dataclass, or None if not found.
         """
-        valid_roles = ("superadmin", "project_manager", "executive_engineer", "admin", "normal_user", "viewer", "pending", "rejected")
+        valid_roles = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user", "viewer", "pending", "rejected")
         if role not in valid_roles:
             logger.warning("Invalid role '%s' requested for user %s", role, chat_id)
             return None

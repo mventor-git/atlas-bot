@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.database.manager import DatabaseManager
+from app.database import driver
 from app.models.database import Report, ReportItem, ReportStatus
 from app.repositories.base import BaseRepository
 from app.repositories.event_log_repository import (
@@ -87,7 +88,7 @@ class ReportRepository(BaseRepository[Report]):
     def add(self, report: Report) -> Report:
         """Add a new report.
 
-        Checks for duplicate date before inserting.
+        Checks for duplicate date within the report's site before inserting.
         If the report has items, they are inserted as well.
 
         Args:
@@ -97,10 +98,10 @@ class ReportRepository(BaseRepository[Report]):
             The report with its assigned ID and item IDs.
 
         Raises:
-            DatabaseError: If a report for this date already exists.
+            DatabaseError: If a report for this date already exists in this site.
         """
-        # Check for duplicate
-        existing = self.get_by_date(report.date)
+        # Check for duplicate (one report per day per site)
+        existing = self.get_by_date(report.date, site_id=report.site_id or driver.site_id())
         if existing is not None:
             raise DatabaseError(
                 f"A report for {report.date} already exists (ID: {existing.id}). "
@@ -110,15 +111,18 @@ class ReportRepository(BaseRepository[Report]):
         now = datetime.now().isoformat()
         # Ensure new reports start with updated_at = created_at
         created = report.created_at or now
+        site = report.site_id or driver.site_id()
+        report.site_id = site
         cursor = self._db.execute(
             """INSERT INTO reports
-               (date, day, status, pdf_path, excel_path, created_at, telegram_user,
+               (date, day, site_id, status, pdf_path, excel_path, created_at, telegram_user,
                 updated_at, finalized_at, locked_at, locked_by, source_date, preview_pdf_path)
                VALUES (?, ?, ?, ?, ?, ?, ?,
-                       ?, ?, ?, ?, ?, ?)""",
+                       ?, ?, ?, ?, ?, ?, ?)""",
             (
                 report.date,
                 report.day,
+                site,
                 report.status.value,
                 report.pdf_path,
                 report.excel_path,
@@ -318,17 +322,19 @@ class ReportRepository(BaseRepository[Report]):
 
     # --- Additional query methods ---
 
-    def get_by_date(self, date: str) -> Optional[Report]:
-        """Get a report for a specific date.
+    def get_by_date(self, date: str, site_id: str | None = None) -> Optional[Report]:
+        """Get a report for a specific date within a site.
 
         Args:
             date: The date string in YYYY-MM-DD format.
+            site_id: Tenant site (defaults to this bot's SITE_ID).
 
         Returns:
             Report with items if found, None otherwise.
         """
+        site = site_id or driver.site_id()
         row = self._db.execute(
-            "SELECT * FROM reports WHERE date = ?", (date,)
+            "SELECT * FROM reports WHERE date = ? AND site_id = ?", (date, site)
         ).fetchone()
 
         if row is None:
@@ -338,17 +344,11 @@ class ReportRepository(BaseRepository[Report]):
         report.items = self._get_items_for_report(report.id)
         return report
 
-    def exists_for_date(self, date: str) -> bool:
-        """Check if a report exists for the given date.
-
-        Args:
-            date: The date string in YYYY-MM-DD format.
-
-        Returns:
-            True if a report exists for this date.
-        """
+    def exists_for_date(self, date: str, site_id: str | None = None) -> bool:
+        """Check if a report exists for the given date within a site."""
+        site = site_id or driver.site_id()
         row = self._db.execute(
-            "SELECT 1 FROM reports WHERE date = ? LIMIT 1", (date,)
+            "SELECT 1 FROM reports WHERE date = ? AND site_id = ? LIMIT 1", (date, site)
         ).fetchone()
         return row is not None
 
@@ -426,6 +426,7 @@ class ReportRepository(BaseRepository[Report]):
             locked_by=row["locked_by"] if "locked_by" in row.keys() else None,
             source_date=row["source_date"] if "source_date" in row.keys() else None,
             preview_pdf_path=row["preview_pdf_path"] if "preview_pdf_path" in row.keys() else None,
+            site_id=row["site_id"] or "default" if "site_id" in row.keys() else "default",
         )
 
     def _get_items_for_report(self, report_id: int) -> list[ReportItem]:
