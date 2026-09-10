@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.models.historical_search import HistoricalSearchResult, HistoricalSearchMatch
 
@@ -70,7 +71,7 @@ class HistoricalSearchRepository:
             nearest_next=next_match,
         )
 
-    def contractor_has_reports(self, contractor: str) -> bool:
+    def contractor_has_reports(self, contractor: str, site_id: str | None = None) -> bool:
         """Check if a contractor has any reports at all.
 
         Args:
@@ -84,10 +85,11 @@ class HistoricalSearchRepository:
             return False
 
         row = self._db.execute(
-            """SELECT 1 FROM report_items
-               WHERE LOWER(contractor) LIKE ?
+            """SELECT 1 FROM report_items ri
+               JOIN reports r ON ri.report_id = r.id
+               WHERE LOWER(ri.contractor) LIKE ? AND r.site_id = ?
                LIMIT 1""",
-            (f"%{query_lower}%",),
+            (f"%{query_lower}%", site_id or driver.site_id()),
         ).fetchone()
         return row is not None
 
@@ -166,7 +168,7 @@ class HistoricalSearchRepository:
     # --- Private helper methods ---
 
     def _get_exact_match(
-        self, q_lower: str, date: str
+        self, q_lower: str, date: str, site_id: str | None = None
     ) -> Optional[HistoricalSearchMatch]:
         """Get report for exact date where contractor matches."""
         row = self._db.execute(
@@ -175,9 +177,9 @@ class HistoricalSearchRepository:
                       ri.contractor_code, r.pdf_path, r.excel_path
                FROM reports r
                JOIN report_items ri ON ri.report_id = r.id
-               WHERE r.date = ? AND LOWER(ri.contractor) LIKE ?
+               WHERE r.date = ? AND r.site_id = ? AND LOWER(ri.contractor) LIKE ?
                LIMIT 1""",
-            (date, f"%{q_lower}%"),
+            (date, site_id or driver.site_id(), f"%{q_lower}%"),
         ).fetchone()
 
         if row is None:
@@ -195,7 +197,7 @@ class HistoricalSearchRepository:
         )
 
     def _find_nearest_previous(
-        self, q_lower: str, date: str
+        self, q_lower: str, date: str, site_id: str | None = None
     ) -> Optional[HistoricalSearchMatch]:
         """Find nearest report before date where contractor appears."""
         row = self._db.execute(
@@ -204,10 +206,10 @@ class HistoricalSearchRepository:
                       ri.contractor_code, r.pdf_path, r.excel_path
                FROM reports r
                JOIN report_items ri ON ri.report_id = r.id
-               WHERE r.date < ? AND LOWER(ri.contractor) LIKE ?
+               WHERE r.date < ? AND r.site_id = ? AND LOWER(ri.contractor) LIKE ?
                ORDER BY r.date DESC
                LIMIT 1""",
-            (date, f"%{q_lower}%"),
+            (date, site_id or driver.site_id(), f"%{q_lower}%"),
         ).fetchone()
 
         if row is None:
@@ -225,7 +227,7 @@ class HistoricalSearchRepository:
         )
 
     def _find_nearest_next(
-        self, q_lower: str, date: str
+        self, q_lower: str, date: str, site_id: str | None = None
     ) -> Optional[HistoricalSearchMatch]:
         """Find nearest report after date where contractor appears."""
         row = self._db.execute(
@@ -234,10 +236,10 @@ class HistoricalSearchRepository:
                       ri.contractor_code, r.pdf_path, r.excel_path
                FROM reports r
                JOIN report_items ri ON ri.report_id = r.id
-               WHERE r.date > ? AND LOWER(ri.contractor) LIKE ?
+               WHERE r.date > ? AND r.site_id = ? AND LOWER(ri.contractor) LIKE ?
                ORDER BY r.date ASC
                LIMIT 1""",
-            (date, f"%{q_lower}%"),
+            (date, site_id or driver.site_id(), f"%{q_lower}%"),
         ).fetchone()
 
         if row is None:

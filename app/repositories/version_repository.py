@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.models.database import Report, ReportItem, ReportStatus, ReportVersion
 from app.repositories.base import BaseRepository
@@ -70,6 +71,14 @@ class VersionRepository(BaseRepository[ReportVersion]):
         """
         if report.id is None:
             raise DatabaseError("Cannot create version for a report without an ID.")
+
+        # Refuse versions for reports outside this site
+        site = report.site_id or driver.site_id()
+        if self._report_repo.get_by_id(report.id, site_id=site) is None:
+            raise DatabaseError(
+                f"Report {report.id} not found in this site - version refused."
+            )
+        report.site_id = site
 
         # Get next version number
         last_version = self._db.execute(
@@ -135,7 +144,7 @@ class VersionRepository(BaseRepository[ReportVersion]):
 
     # --- Query methods ---
 
-    def get_versions(self, report_id: int) -> list[ReportVersion]:
+    def get_versions(self, report_id: int, site_id: str | None = None) -> list[ReportVersion]:
         """Get all versions for a report, ordered by version number.
 
         Args:
@@ -145,14 +154,15 @@ class VersionRepository(BaseRepository[ReportVersion]):
             List of ReportVersion objects, oldest first.
         """
         rows = self._db.execute(
-            """SELECT * FROM report_versions
-               WHERE report_id = ?
+            """SELECT v.* FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE v.report_id = ? AND r.site_id = ?
                ORDER BY version_number ASC""",
-            (report_id,),
+            (report_id, site_id or driver.site_id()),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
-    def get_latest_version(self, report_id: int) -> Optional[ReportVersion]:
+    def get_latest_version(self, report_id: int, site_id: str | None = None) -> Optional[ReportVersion]:
         """Get the latest version for a report.
 
         Args:
@@ -162,15 +172,16 @@ class VersionRepository(BaseRepository[ReportVersion]):
             The most recent ReportVersion, or None.
         """
         row = self._db.execute(
-            """SELECT * FROM report_versions
-               WHERE report_id = ?
+            """SELECT v.* FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE v.report_id = ? AND r.site_id = ?
                ORDER BY version_number DESC
                LIMIT 1""",
-            (report_id,),
+            (report_id, site_id or driver.site_id()),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def prune_versions(self, report_id: int, max_versions: int) -> int:
+    def prune_versions(self, report_id: int, max_versions: int, site_id: str | None = None) -> int:
         """Remove oldest versions exceeding the limit.
 
         Args:
@@ -181,9 +192,12 @@ class VersionRepository(BaseRepository[ReportVersion]):
             Number of versions removed.
         """
         # Count current versions
+        site = site_id or driver.site_id()
         count_row = self._db.execute(
-            "SELECT COUNT(*) as cnt FROM report_versions WHERE report_id = ?",
-            (report_id,),
+            """SELECT COUNT(*) as cnt FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE v.report_id = ? AND r.site_id = ?""",
+            (report_id, site),
         ).fetchone()
         count = count_row["cnt"] if count_row else 0
 
@@ -195,12 +209,13 @@ class VersionRepository(BaseRepository[ReportVersion]):
         self._db.execute(
             """DELETE FROM report_versions
                WHERE id IN (
-                   SELECT id FROM report_versions
-                   WHERE report_id = ?
-                   ORDER BY version_number ASC
+                   SELECT v.id FROM report_versions v
+                   JOIN reports r ON v.report_id = r.id
+                   WHERE v.report_id = ? AND r.site_id = ?
+                   ORDER BY v.version_number ASC
                    LIMIT ?
                )""",
-            (report_id, to_delete),
+            (report_id, site, to_delete),
         )
         self._db.commit()
         logger.info(
@@ -211,15 +226,22 @@ class VersionRepository(BaseRepository[ReportVersion]):
 
     # --- BaseRepository implementation ---
 
-    def get_by_id(self, entity_id: int) -> Optional[ReportVersion]:
+    def get_by_id(self, entity_id: int, site_id: str | None = None) -> Optional[ReportVersion]:
         row = self._db.execute(
-            "SELECT * FROM report_versions WHERE id = ?", (entity_id,)
+            """SELECT v.* FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE v.id = ? AND r.site_id = ?""",
+            (entity_id, site_id or driver.site_id()),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def get_all(self) -> list[ReportVersion]:
+    def get_all(self, site_id: str | None = None) -> list[ReportVersion]:
         rows = self._db.execute(
-            "SELECT * FROM report_versions ORDER BY report_id, version_number"
+            """SELECT v.* FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE r.site_id = ?
+               ORDER BY v.report_id, v.version_number""",
+            (site_id or driver.site_id(),),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
@@ -241,28 +263,37 @@ class VersionRepository(BaseRepository[ReportVersion]):
         entity.id = cursor.lastrowid
         return entity
 
-    def update(self, entity: ReportVersion) -> ReportVersion:
+    def update(self, entity: ReportVersion, site_id: str | None = None) -> ReportVersion:
         if entity.id is None:
             raise DatabaseError("Cannot update a ReportVersion without an ID.")
         self._db.execute(
             """UPDATE report_versions
                SET snapshot=?, change_summary=?
-               WHERE id=?""",
-            (entity.snapshot, entity.change_summary, entity.id),
+               WHERE id=? AND report_id IN (
+                   SELECT id FROM reports WHERE site_id = ?
+               )""",
+            (entity.snapshot, entity.change_summary, entity.id, site_id or driver.site_id()),
         )
         self._db.commit()
         return entity
 
-    def delete(self, entity_id: int) -> bool:
+    def delete(self, entity_id: int, site_id: str | None = None) -> bool:
         cursor = self._db.execute(
-            "DELETE FROM report_versions WHERE id = ?", (entity_id,)
+            """DELETE FROM report_versions
+               WHERE id = ? AND report_id IN (
+                   SELECT id FROM reports WHERE site_id = ?
+               )""",
+            (entity_id, site_id or driver.site_id()),
         )
         self._db.commit()
         return cursor.rowcount > 0
 
-    def count(self) -> int:
+    def count(self, site_id: str | None = None) -> int:
         row = self._db.execute(
-            "SELECT COUNT(*) as cnt FROM report_versions"
+            """SELECT COUNT(*) as cnt FROM report_versions v
+               JOIN reports r ON v.report_id = r.id
+               WHERE r.site_id = ?""",
+            (site_id or driver.site_id(),),
         ).fetchone()
         return row["cnt"] if row else 0
 

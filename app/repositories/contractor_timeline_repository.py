@@ -6,6 +6,7 @@ All queries are SQL-based with proper indexing for performance.
 
 from typing import Optional
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.models.contractor_timeline import TimelineEntry, TimelineResult
 
@@ -31,6 +32,7 @@ class ContractorTimelineRepository:
         contractor: str,
         page: int = 1,
         page_size: int = 10,
+        site_id: str | None = None,
     ) -> TimelineResult:
         """Get a paginated timeline for a specific contractor.
 
@@ -47,13 +49,15 @@ class ContractorTimelineRepository:
             return TimelineResult(contractor=contractor)
 
         # Get total count
+        site = site_id or driver.site_id()
         count_row = self._db.execute(
             """SELECT COUNT(*) as cnt
                FROM report_items ri
                JOIN reports r ON ri.report_id = r.id
                WHERE LOWER(ri.contractor) LIKE ?
+               AND r.site_id = ?
                AND r.status != 'no_report'""",
-            (f"%{query_lower}%",),
+            (f"%{query_lower}%", site),
         ).fetchone()
         total_entries = count_row["cnt"] if count_row else 0
 
@@ -73,10 +77,11 @@ class ContractorTimelineRepository:
                FROM report_items ri
                JOIN reports r ON ri.report_id = r.id
                WHERE LOWER(ri.contractor) LIKE ?
+               AND r.site_id = ?
                AND r.status != 'no_report'
                ORDER BY r.date DESC, ri.id ASC
                LIMIT ? OFFSET ?""",
-            (f"%{query_lower}%", page_size, offset),
+            (f"%{query_lower}%", site, page_size, offset),
         ).fetchall()
 
         entries = [
@@ -104,7 +109,7 @@ class ContractorTimelineRepository:
             total_pages=total_pages,
         )
 
-    def get_all_contractor_dates(self, contractor: str) -> list[str]:
+    def get_all_contractor_dates(self, contractor: str, site_id: str | None = None) -> list[str]:
         """Get all distinct dates a contractor worked.
 
         Args:
@@ -122,14 +127,15 @@ class ContractorTimelineRepository:
                FROM report_items ri
                JOIN reports r ON ri.report_id = r.id
                WHERE LOWER(ri.contractor) LIKE ?
+               AND r.site_id = ?
                AND r.status != 'no_report'
                ORDER BY r.date DESC""",
-            (f"%{query_lower}%",),
+            (f"%{query_lower}%", site_id or driver.site_id()),
         ).fetchall()
 
         return [row["date"] for row in rows]
 
-    def contractor_exists(self, contractor: str) -> bool:
+    def contractor_exists(self, contractor: str, site_id: str | None = None) -> bool:
         """Check if a contractor exists in any report.
 
         Args:
@@ -143,9 +149,10 @@ class ContractorTimelineRepository:
             return False
 
         row = self._db.execute(
-            """SELECT 1 FROM report_items
-               WHERE LOWER(contractor) LIKE ?
+            """SELECT 1 FROM report_items ri
+               JOIN reports r ON ri.report_id = r.id
+               WHERE LOWER(ri.contractor) LIKE ? AND r.site_id = ?
                LIMIT 1""",
-            (f"%{query_lower}%",),
+            (f"%{query_lower}%", site_id or driver.site_id()),
         ).fetchone()
         return row is not None

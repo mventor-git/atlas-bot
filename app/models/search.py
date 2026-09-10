@@ -20,6 +20,7 @@ class SearchQuery:
     status: Optional[str | ReportStatus] = None
     page: int = 0
     page_size: int = 10
+    site_id: Optional[str] = None
 
     @property
     def offset(self) -> int:

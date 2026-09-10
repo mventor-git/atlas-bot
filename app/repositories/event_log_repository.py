@@ -105,7 +105,7 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
 
     # --- Query methods ---
 
-    def get_by_user(self, telegram_user: str, limit: int = 50) -> list[EventLogEntry]:
+    def get_by_user(self, telegram_user: str, limit: int = 50, site_id: str | None = None) -> list[EventLogEntry]:
         """Get events for a specific user, most recent first.
 
         Args:
@@ -117,14 +117,14 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
         """
         rows = self._db.execute(
             """SELECT * FROM event_log
-               WHERE telegram_user = ?
+               WHERE telegram_user = ? AND site_id = ?
                ORDER BY timestamp DESC
                LIMIT ?""",
-            (telegram_user, limit),
+            (telegram_user, site_id or driver.site_id(), limit),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
-    def get_by_action(self, action: str, limit: int = 50) -> list[EventLogEntry]:
+    def get_by_action(self, action: str, limit: int = 50, site_id: str | None = None) -> list[EventLogEntry]:
         """Get events of a specific type, most recent first.
 
         Args:
@@ -136,15 +136,15 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
         """
         rows = self._db.execute(
             """SELECT * FROM event_log
-               WHERE action = ?
+               WHERE action = ? AND site_id = ?
                ORDER BY timestamp DESC
                LIMIT ?""",
-            (action, limit),
+            (action, site_id or driver.site_id(), limit),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
     def get_by_object(
-        self, object_type: str, object_id: int, limit: int = 50
+        self, object_type: str, object_id: int, limit: int = 50, site_id: str | None = None
     ) -> list[EventLogEntry]:
         """Get events for a specific object, most recent first.
 
@@ -158,14 +158,14 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
         """
         rows = self._db.execute(
             """SELECT * FROM event_log
-               WHERE object_type = ? AND object_id = ?
+               WHERE object_type = ? AND object_id = ? AND site_id = ?
                ORDER BY timestamp DESC
                LIMIT ?""",
-            (object_type, object_id, limit),
+            (object_type, object_id, site_id or driver.site_id(), limit),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
-    def get_recent(self, limit: int = 50) -> list[EventLogEntry]:
+    def get_recent(self, limit: int = 50, site_id: str | None = None) -> list[EventLogEntry]:
         """Get the most recent events across all users.
 
         Args:
@@ -175,13 +175,13 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
             List of EventLogEntry objects.
         """
         rows = self._db.execute(
-            "SELECT * FROM event_log ORDER BY timestamp DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM event_log WHERE site_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (site_id or driver.site_id(), limit),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
     def get_by_date_range(
-        self, start_date: str, end_date: str, limit: int = 100
+        self, start_date: str, end_date: str, limit: int = 100, site_id: str | None = None
     ) -> list[EventLogEntry]:
         """Get events within a date range.
 
@@ -195,10 +195,10 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
         """
         rows = self._db.execute(
             """SELECT * FROM event_log
-               WHERE timestamp >= ? AND timestamp <= ?
+               WHERE timestamp >= ? AND timestamp <= ? AND site_id = ?
                ORDER BY timestamp DESC
                LIMIT ?""",
-            (start_date, end_date, limit),
+            (start_date, end_date, site_id or driver.site_id(), limit),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
@@ -215,7 +215,8 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
 
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         cursor = self._db.execute(
-            "DELETE FROM event_log WHERE timestamp < ?", (cutoff,)
+            "DELETE FROM event_log WHERE timestamp < ? AND site_id = ?",
+            (cutoff, driver.site_id()),
         )
         self._db.commit()
         deleted = cursor.rowcount
@@ -223,21 +224,26 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
             logger.info("Cleaned up %d events older than %d days", deleted, days)
         return deleted
 
-    def count(self) -> int:
-        row = self._db.execute("SELECT COUNT(*) as cnt FROM event_log").fetchone()
+    def count(self, site_id: str | None = None) -> int:
+        row = self._db.execute(
+            "SELECT COUNT(*) as cnt FROM event_log WHERE site_id = ?",
+            (site_id or driver.site_id(),),
+        ).fetchone()
         return row["cnt"] if row else 0
 
     # --- BaseRepository implementation ---
 
-    def get_by_id(self, entity_id: int) -> Optional[EventLogEntry]:
+    def get_by_id(self, entity_id: int, site_id: str | None = None) -> Optional[EventLogEntry]:
         row = self._db.execute(
-            "SELECT * FROM event_log WHERE id = ?", (entity_id,)
+            "SELECT * FROM event_log WHERE id = ? AND site_id = ?",
+            (entity_id, site_id or driver.site_id()),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def get_all(self) -> list[EventLogEntry]:
+    def get_all(self, site_id: str | None = None) -> list[EventLogEntry]:
         rows = self._db.execute(
-            "SELECT * FROM event_log ORDER BY timestamp DESC"
+            "SELECT * FROM event_log WHERE site_id = ? ORDER BY timestamp DESC",
+            (site_id or driver.site_id(),),
         ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
@@ -268,9 +274,10 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
     def update(self, entity: EventLogEntry) -> EventLogEntry:
         raise DatabaseError("Event log entries are immutable — cannot update.")
 
-    def delete(self, entity_id: int) -> bool:
+    def delete(self, entity_id: int, site_id: str | None = None) -> bool:
         cursor = self._db.execute(
-            "DELETE FROM event_log WHERE id = ?", (entity_id,)
+            "DELETE FROM event_log WHERE id = ? AND site_id = ?",
+            (entity_id, site_id or driver.site_id()),
         )
         self._db.commit()
         return cursor.rowcount > 0

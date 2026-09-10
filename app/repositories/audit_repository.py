@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.database.manager import DatabaseManager
+from app.database import driver
 from app.models.audit import UserActivityLog
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -124,11 +125,12 @@ class AuditRepository:
         """
         cursor = self._db.execute(
             """INSERT INTO user_activity_log
-                (telegram_user, user_role, action, report_date, report_status,
+                (telegram_user, site_id, user_role, action, report_date, report_status,
                  contractor_name, workers, zone, details, reverted_entry_id, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entry.telegram_user,
+                entry.site_id or driver.site_id(),
                 entry.user_role,
                 entry.action,
                 entry.report_date,
@@ -143,6 +145,8 @@ class AuditRepository:
         )
         self._db.commit()
         entry.id = cursor.lastrowid
+        if not entry.site_id:
+            entry.site_id = driver.site_id()
         logger.debug("Logged activity: %s by %s (%s)", entry.action, entry.telegram_user, entry.user_role)
         return entry
 
@@ -334,7 +338,7 @@ class AuditRepository:
 
     # --- Queries ---
 
-    def get_by_user(self, telegram_user: str, limit: int = 100) -> list[UserActivityLog]:
+    def get_by_user(self, telegram_user: str, limit: int = 100, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all activity for a specific user.
 
         Args:
@@ -345,12 +349,12 @@ class AuditRepository:
             List of UserActivityLog entries, newest first.
         """
         cursor = self._db.execute(
-            "SELECT * FROM user_activity_log WHERE telegram_user = ? ORDER BY timestamp DESC LIMIT ?",
-            (telegram_user, limit),
+            "SELECT * FROM user_activity_log WHERE telegram_user = ? AND site_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (telegram_user, site_id or driver.site_id(), limit),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_by_action(self, action: str, limit: int = 100) -> list[UserActivityLog]:
+    def get_by_action(self, action: str, limit: int = 100, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all entries with a specific action.
 
         Args:
@@ -361,8 +365,8 @@ class AuditRepository:
             List of UserActivityLog entries.
         """
         cursor = self._db.execute(
-            "SELECT * FROM user_activity_log WHERE action = ? ORDER BY timestamp DESC LIMIT ?",
-            (action, limit),
+            "SELECT * FROM user_activity_log WHERE action = ? AND site_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (action, site_id or driver.site_id(), limit),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
@@ -388,7 +392,7 @@ class AuditRepository:
         """
         return self.get_by_action("unlocked", limit)
 
-    def get_added_values_by_user(self, telegram_user: str) -> list[UserActivityLog]:
+    def get_added_values_by_user(self, telegram_user: str, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all 'added' entries by a specific user (non-reverted).
 
         Args:
@@ -397,36 +401,39 @@ class AuditRepository:
         Returns:
             List of 'added' UserActivityLog entries that were NOT reverted.
         """
+        site = site_id or driver.site_id()
         cursor = self._db.execute(
             """SELECT * FROM user_activity_log
-            WHERE telegram_user = ? AND action = 'added'
+            WHERE telegram_user = ? AND site_id = ? AND action = 'added'
             AND id NOT IN (
                 SELECT reverted_entry_id FROM user_activity_log
-                WHERE action = 'reverted' AND reverted_entry_id IS NOT NULL
+                WHERE site_id = ? AND action = 'reverted' AND reverted_entry_id IS NOT NULL
             )
             ORDER BY timestamp DESC""",
-            (telegram_user,),
+            (telegram_user, site, site),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_all_added_values(self) -> list[UserActivityLog]:
+    def get_all_added_values(self, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all 'added' entries across all users (non-reverted).
 
         Returns:
             List of 'added' UserActivityLog entries that were NOT reverted.
         """
+        site = site_id or driver.site_id()
         cursor = self._db.execute(
             """SELECT * FROM user_activity_log
-            WHERE action = 'added'
+            WHERE site_id = ? AND action = 'added'
             AND id NOT IN (
                 SELECT reverted_entry_id FROM user_activity_log
-                WHERE action = 'reverted' AND reverted_entry_id IS NOT NULL
+                WHERE site_id = ? AND action = 'reverted' AND reverted_entry_id IS NOT NULL
             )
-            ORDER BY timestamp DESC"""
+            ORDER BY timestamp DESC""",
+            (site, site),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_reverted_by_user(self, telegram_user: str) -> list[UserActivityLog]:
+    def get_reverted_by_user(self, telegram_user: str, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all 'reverted' entries by a specific user.
 
         Args:
@@ -436,12 +443,12 @@ class AuditRepository:
             List of 'reverted' UserActivityLog entries.
         """
         cursor = self._db.execute(
-            "SELECT * FROM user_activity_log WHERE telegram_user = ? AND action = 'reverted' ORDER BY timestamp DESC",
-            (telegram_user,),
+            "SELECT * FROM user_activity_log WHERE telegram_user = ? AND site_id = ? AND action = 'reverted' ORDER BY timestamp DESC",
+            (telegram_user, site_id or driver.site_id()),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_views_by_user(self, telegram_user: str) -> list[UserActivityLog]:
+    def get_views_by_user(self, telegram_user: str, site_id: str | None = None) -> list[UserActivityLog]:
         """Get all 'viewed' entries by a specific user.
 
         Args:
@@ -451,12 +458,12 @@ class AuditRepository:
             List of 'viewed' UserActivityLog entries.
         """
         cursor = self._db.execute(
-            "SELECT * FROM user_activity_log WHERE telegram_user = ? AND action = 'viewed' ORDER BY timestamp DESC",
-            (telegram_user,),
+            "SELECT * FROM user_activity_log WHERE telegram_user = ? AND site_id = ? AND action = 'viewed' ORDER BY timestamp DESC",
+            (telegram_user, site_id or driver.site_id()),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_recent_by_all_users(self, limit: int = 50) -> list[UserActivityLog]:
+    def get_recent_by_all_users(self, limit: int = 50, site_id: str | None = None) -> list[UserActivityLog]:
         """Get the most recent activity across all users.
 
         Args:
@@ -466,12 +473,12 @@ class AuditRepository:
             List of recent UserActivityLog entries.
         """
         cursor = self._db.execute(
-            "SELECT * FROM user_activity_log ORDER BY timestamp DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM user_activity_log WHERE site_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (site_id or driver.site_id(), limit),
         )
         return [self._row_to_entry(row) for row in cursor.fetchall()]
 
-    def get_distinct_users(self) -> list[dict]:
+    def get_distinct_users(self, site_id: str | None = None) -> list[dict]:
         """Get distinct users who have activity logs with their roles.
 
         Returns:
@@ -480,8 +487,10 @@ class AuditRepository:
         cursor = self._db.execute(
             """SELECT telegram_user, user_role, MAX(timestamp) as last_active
             FROM user_activity_log
+            WHERE site_id = ?
             GROUP BY telegram_user
-            ORDER BY last_active DESC"""
+            ORDER BY last_active DESC""",
+            (site_id or driver.site_id(),),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -512,5 +521,6 @@ class AuditRepository:
             zone=self._safe_get(row, "zone"),
             details=self._safe_get(row, "details"),
             reverted_entry_id=row["reverted_entry_id"] if row["reverted_entry_id"] is not None else None,
+            site_id=self._safe_get(row, "site_id") or "default",
             timestamp=row["timestamp"],
         )
