@@ -55,6 +55,7 @@ def create_bot_app(
     notification_manager=None,
     daily_comparison_service=None,
     hr_service=None,
+    user_repository=None,
 ) -> Application:
     """Create and configure the Telegram bot application.
 
@@ -91,6 +92,7 @@ def create_bot_app(
     app.bot_data["notification_manager"] = notification_manager
     app.bot_data["daily_comparison_service"] = daily_comparison_service
     app.bot_data["hr_service"] = hr_service
+    app.bot_data["user_repository"] = user_repository
     app.bot_data["app_config"] = app_config
 
     logger.info(

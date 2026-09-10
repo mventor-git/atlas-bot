@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS users (
         CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
     username TEXT,
     first_name TEXT,
+    site_id TEXT NOT NULL DEFAULT 'default',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     approved_by TEXT,
     approved_at TEXT,
@@ -150,6 +151,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_site ON users(site_id);
 
 -- User-added contractors (mventor-ticket-036)
 CREATE TABLE IF NOT EXISTS contractors (
@@ -300,6 +302,7 @@ CREATE TABLE IF NOT EXISTS users (
         CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
     username TEXT,
     first_name TEXT,
+    site_id TEXT NOT NULL DEFAULT 'default',
     created_at TEXT NOT NULL DEFAULT (now()),
     approved_by TEXT,
     approved_at TEXT,
@@ -308,6 +311,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_site ON users(site_id);
 
 CREATE TABLE IF NOT EXISTS contractors (
     id SERIAL PRIMARY KEY,
@@ -494,7 +498,7 @@ class DatabaseManager:
         (user_activity_log, recent_contractors carry site_id in their
         own DDL and call this after rebuilds).
         """
-        for table in ("reports", "event_log", "user_activity_log", "recent_contractors"):
+        for table in ("reports", "event_log", "user_activity_log", "recent_contractors", "users"):
             if not self.table_exists(table):
                 continue  # repository-owned tables are created lazily by repos
             if not self.column_exists(table, "site_id"):
@@ -866,6 +870,7 @@ class DatabaseManager:
                         CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
                     username TEXT,
                     first_name TEXT,
+                    site_id TEXT NOT NULL DEFAULT 'default',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     approved_by TEXT,
                     approved_at TEXT,
@@ -874,14 +879,16 @@ class DatabaseManager:
             )
             conn.execute(
                 """INSERT INTO users
-                    (id, chat_id, role, username, first_name, created_at,
+                    (id, chat_id, role, username, first_name, site_id, created_at,
                      approved_by, approved_at, updated_at)
-                   SELECT id, chat_id, role, username, first_name, created_at,
+                    SELECT id, chat_id, role, username, first_name,
+                     COALESCE(site_id, 'default'), created_at,
                      approved_by, approved_at, updated_at FROM users_old"""
             )
             conn.execute("DROP TABLE users_old")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_site ON users(site_id)")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.commit()
             logger.info("users.role CHECK widened to include extended roles.")
