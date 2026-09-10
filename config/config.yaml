@@ -4,6 +4,9 @@
 # Changing the template requires editing ONLY this file.
 # LibreOffice headless renders PDFs from the same templates.
 
+# Document language: en (LTR) or ar (RTL) - set per deployment
+language: "en"
+
 # Template settings
 template:
   # Path to the tables file containing contractor and zone data
@@ -22,6 +25,10 @@ template:
 
   # Contractor period report template
   contractor_report_template: "templates/contractor_report_template.ots"
+
+  # HR request templates (AR variants use the _ar suffix)
+  hr_advance_template: "templates/hr-advance-template.ots"
+  hr_transport_template: "templates/acc-transport-template.ots"
 
   # Default template (used as fallback if new templates don't exist)
   file: "templates/contractor-daily-labor-template.ods"
