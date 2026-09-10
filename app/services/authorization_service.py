@@ -38,7 +38,8 @@ class AuthorizationService:
 
     def __init__(self, user_repo: UserRepository,
                  super_admin_chat_id: str = "",
-                 admin_chat_ids: Optional[list[str]] = None) -> None:
+                 admin_chat_ids: Optional[list[str]] = None,
+                 membership_repo=None) -> None:
         """Initialize the authorization service.
 
         Args:
@@ -49,6 +50,7 @@ class AuthorizationService:
         self._repo = user_repo
         self._super_admin_chat_id = super_admin_chat_id
         self._extra_admin_ids = set(admin_chat_ids or [])
+        self._memberships = membership_repo
 
     # --- Public API ---
 
@@ -186,6 +188,65 @@ class AuthorizationService:
         """Check if a user can HR-decide requests (gate 2, final)."""
         return self.get_role(chat_id) in self.CAN_APPROVE_HR_ROLES
 
+    # --- Capability layer (008 tenancy) ---
+
+    def has_capability(self, chat_id: str, capability: str,
+                       site_id: str | None = None) -> bool:
+        """Capability check: membership grants, else role defaults.
+
+        Args:
+            chat_id: Telegram chat ID.
+            capability: Registry name (unknown names always deny).
+            site_id: Tenant site (defaults to this bot's SITE_ID).
+
+        Returns:
+            True only with an active membership grant or a role default.
+        """
+        from app.auth import capabilities as caps
+        from app.database import driver
+
+        if not caps.is_known(capability):
+            return False
+        role = self.get_role(chat_id)
+        if role in ("pending", "rejected"):
+            return False
+        site = site_id or driver.site_id()
+        if self._memberships is not None:
+            membership = self._memberships.find(chat_id, site)
+            if membership is not None and membership.status == "active":
+                if membership.capabilities:
+                    return capability in membership.capabilities
+                # No explicit grants: fall through to role defaults
+            elif membership is not None:
+                return False  # suspended
+            else:
+                return False  # no membership in this site
+        return capability in caps.for_role(role)
+
+    def resolve_active_site(self, chat_id: str,
+                            session_site: str | None = None) -> str | None:
+        """Validate session site against memberships; auto-bind singles.
+
+        Returns:
+            The authorized active site, or None when the user must pick
+            (multi-site, no valid session) or has no membership at all.
+        """
+        if self._memberships is None:
+            return session_site
+        memberships = self._memberships.active_for_user(chat_id)
+        sites = [m.site_id for m in memberships]
+        if session_site in sites:
+            return session_site
+        if len(sites) == 1:
+            return sites[0]
+        return None
+
+    def migrate_memberships(self) -> int:
+        """Backfill memberships from legacy users.site_id. Returns rows created."""
+        if self._memberships is None:
+            return 0
+        return self._memberships.migrate_from_users(self._repo)
+
     # --- User management ---
 
     def register_or_get(self, chat_id: str, username: Optional[str] = None,
@@ -254,7 +315,13 @@ class AuthorizationService:
         """
         if role not in ("normal_user", "viewer"):
             role = "normal_user"
-        return self._repo.set_role(chat_id, role, approved_by=approved_by)
+        updated = self._repo.set_role(chat_id, role, approved_by=approved_by)
+        if updated is not None and self._memberships is not None:
+            from app.database import driver
+
+            site = (updated.site_id or "").strip() or driver.site_id()
+            self._memberships.grant(chat_id, site, [])
+        return updated
 
     def reject_user(self, chat_id: str, rejected_by: str) -> Optional[User]:
         """Reject a pending user.

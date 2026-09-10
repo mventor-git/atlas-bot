@@ -31,6 +31,7 @@ if str(_project_root) not in sys.path:
 from app.config.loader import ConfigLoader, ConfigurationError
 from app.database.manager import DatabaseManager
 from app.repositories.report_repository import ReportRepository
+from app.repositories.membership_repository import MembershipRepository
 from app.repositories.hr_repository import HRRepository
 from app.repositories.recent_contractor_repository import RecentContractorRepository
 from app.repositories.event_log_repository import EventLogRepository
@@ -264,14 +265,19 @@ def main() -> None:
 
         # Initialize authorization service
         user_repo = UserRepository(db_manager)
+        membership_repo = MembershipRepository(db_manager)
         auth_service = AuthorizationService(
             user_repo=user_repo,
             super_admin_chat_id=config.super_admin_chat_id,
             admin_chat_ids=config.admin_chat_ids,
+            membership_repo=membership_repo,
         )
         logger.info("Authorization service initialized (superadmin=%s)", config.super_admin_chat_id)
         if config.admin_chat_ids:
             logger.info("Additional admins from config: %s", config.admin_chat_ids)
+        migrated = auth_service.migrate_memberships()
+        if migrated:
+            logger.info("Migrated %d legacy site memberships.", migrated)
 
         app = create_bot_app(
             report_repository=report_repo_with_events,
