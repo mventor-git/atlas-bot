@@ -1,5 +1,5 @@
 ﻿"""
-Statistics Engine â€” Daily, monthly, and yearly aggregate statistics.
+Statistics Engine — Daily, monthly, and yearly aggregate statistics.
 
 Provides pre-computed and cached statistics for the labor report system.
 Includes averages, top contractors, top zones, and worker trends.

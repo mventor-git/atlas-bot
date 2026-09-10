@@ -86,7 +86,7 @@ class TestReportWorkflowService:
         """Create a draft report in the database."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             status=ReportStatus.DRAFT,
             telegram_user="user123",
             created_at="2026-07-11T08:00:00",
@@ -226,7 +226,7 @@ class TestReportWorkflowService:
         old_time = (datetime.now() - timedelta(hours=48)).isoformat()
         report = Report(
             date="2026-07-09",
-            day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            day="الخميس",
             status=ReportStatus.FINAL,
             telegram_user="user1",
             created_at=old_time,
@@ -250,7 +250,7 @@ class TestReportWorkflowService:
         recent_time = datetime.now().isoformat()
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             status=ReportStatus.FINAL,
             telegram_user="user1",
             created_at=recent_time,
@@ -268,7 +268,7 @@ class TestReportWorkflowService:
         old_time = (datetime.now() - timedelta(hours=48)).isoformat()
         report = Report(
             date="2026-07-09",
-            day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            day="الخميس",
             status=ReportStatus.DRAFT,
             telegram_user="user1",
             created_at=old_time,
@@ -314,7 +314,7 @@ class TestReportWorkflowService:
         old_time = (datetime.now() - timedelta(hours=48)).isoformat()
         report = Report(
             date="2026-07-09",
-            day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            day="الخميس",
             status=ReportStatus.FINAL,
             telegram_user="user1",
             created_at=old_time,
@@ -365,7 +365,7 @@ class TestReportWorkflowService:
         wf = ReportWorkflowService(repo, event_log_service, cfg)
 
         # At deadline (17:00)
-        count = wf.auto_finalize_drafts(current_hour=17, current_minute=0)
+        count = wf.auto_finalize_drafts(current_hour=17, current_minute=0, today_str="2026-07-14")
         assert count == 1
         saved = repo.get_by_id(report.id)
         assert saved is not None
@@ -381,7 +381,7 @@ class TestReportWorkflowService:
         wf = ReportWorkflowService(repo, event_log_service, cfg)
 
         # After deadline (17:30)
-        count = wf.auto_finalize_drafts(current_hour=17, current_minute=30)
+        count = wf.auto_finalize_drafts(current_hour=17, current_minute=30, today_str="2026-07-14")
         assert count == 1
         saved = repo.get_by_id(report.id)
         assert saved is not None
@@ -408,7 +408,7 @@ class TestReportWorkflowService:
         cfg = AppConfig(**self._make_cfg({"lifecycle": {"auto_lock_hours": 0, "max_versions": 50, "auto_finalize_hour": 17}}))
         report = Report(
             date="2026-07-14",
-            day="Ø§Ù„Ø«Ù„Ø§Ø«Ø§Ø¡",
+            day="الثلاثاء",
             status=ReportStatus.DRAFT,
             telegram_user="user1",
         )
@@ -439,7 +439,7 @@ class TestReportWorkflowService:
         report = self._create_draft_report(repo, date="2026-07-14")
         wf = ReportWorkflowService(repo, event_log_service, cfg)
 
-        wf.auto_finalize_drafts(current_hour=17, current_minute=0)
+        wf.auto_finalize_drafts(current_hour=17, current_minute=0, today_str="2026-07-14")
 
         events = event_log_repo.get_by_object("report", report.id)
         assert any(e.action == "report.finalized" for e in events)
@@ -452,12 +452,12 @@ class TestReportWorkflowService:
         report = self._create_draft_report(repo, date="2026-07-14")
         wf = ReportWorkflowService(repo, event_log_service, cfg)
 
-        # Before custom deadline (15:29) â€” should NOT finalize
+        # Before custom deadline (15:29) — should NOT finalize
         count = wf.auto_finalize_drafts(current_hour=15, current_minute=29)
         assert count == 0
 
-        # At custom deadline (15:30) â€” should finalize
-        count = wf.auto_finalize_drafts(current_hour=15, current_minute=30)
+        # At custom deadline (15:30) — should finalize
+        count = wf.auto_finalize_drafts(current_hour=15, current_minute=30, today_str="2026-07-14")
         assert count == 1
         saved = repo.get_by_id(report.id)
         assert saved is not None
@@ -592,7 +592,7 @@ class TestReportWorkflowService:
         """Multiple finalizes should create versions 1, 2, 3..."""
         # Create draft
         draft = Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         draft.add_item(ReportItem(contractor="Civil", workers=5))
@@ -646,7 +646,7 @@ class TestReportWorkflowService:
             repo, event_log_service, config,
             version_repository=BrokenVersionRepo(),  # type: ignore
         )
-        # Should not raise â€” version failure is caught and logged
+        # Should not raise — version failure is caught and logged
         result = broken_wf.finalize_report(draft_report, telegram_user="user")
         assert result.status == ReportStatus.FINAL
         assert result.finalized_at is not None

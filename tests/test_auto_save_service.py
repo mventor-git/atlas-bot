@@ -57,14 +57,14 @@ class TestAutoSaveService:
         return AutoSaveService(repo, event_log_service)
 
     # ------------------------------------------------------------------
-    # save_draft â€” new report
+    # save_draft — new report
     # ------------------------------------------------------------------
 
     def test_save_draft_creates_new_report(self, auto_save: AutoSaveService):
         """Should create a new draft report with DRAFT status."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         saved = auto_save.save_draft(report, telegram_user="user1")
@@ -76,7 +76,7 @@ class TestAutoSaveService:
         """Should persist items when creating a new draft."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report.add_item(ReportItem(contractor="Civil", workers=10, zone="Zone A"))
@@ -90,7 +90,7 @@ class TestAutoSaveService:
         """Should update a report when it already has an ID."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report.add_item(ReportItem(contractor="Civil", workers=10))
@@ -107,7 +107,7 @@ class TestAutoSaveService:
         # Create first
         report1 = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report1.add_item(ReportItem(contractor="Civil", workers=10))
@@ -116,7 +116,7 @@ class TestAutoSaveService:
         # Now create a new Report object with same date, no ID
         report2 = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report2.add_item(ReportItem(contractor="Electrical", workers=5))
@@ -132,7 +132,7 @@ class TestAutoSaveService:
         (the handler should use ReportWorkflowService.unlock_report instead)."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report.add_item(ReportItem(contractor="Civil", workers=10))
@@ -147,7 +147,7 @@ class TestAutoSaveService:
         self._force_update_status(auto_save, saved)
 
         # Now save_draft should raise because report is finalized in DB
-        saved2 = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        saved2 = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         with pytest.raises(ReportLifecycleError):
             auto_save.save_draft(saved2, telegram_user="user1")
 
@@ -168,7 +168,7 @@ class TestAutoSaveService:
         """Should add an item to a report and persist it."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         item = ReportItem(contractor="Civil", workers=10, zone="Zone A")
@@ -181,7 +181,7 @@ class TestAutoSaveService:
         """Should handle multiple item additions."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         item1 = ReportItem(contractor="Civil", workers=10)
@@ -195,7 +195,7 @@ class TestAutoSaveService:
         """Should not duplicate an item already in the list."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         item = ReportItem(contractor="Civil", workers=10)
@@ -212,7 +212,7 @@ class TestAutoSaveService:
         """Should remove an item by index and persist."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         report.add_item(ReportItem(contractor="Civil", workers=10))
@@ -228,11 +228,11 @@ class TestAutoSaveService:
         """Should handle invalid index gracefully."""
         report = Report(
             date="2026-07-11",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            day="السبت",
             telegram_user="user1",
         )
         saved = auto_save.save_draft(report, telegram_user="user1")
-        # Remove with invalid index â€” should not raise
+        # Remove with invalid index — should not raise
         result = auto_save.remove_item_and_save(saved, 5, telegram_user="user1")
         assert len(result.items) == 0
 
@@ -242,7 +242,7 @@ class TestAutoSaveService:
 
     def test_save_draft_logs_event(self, auto_save: AutoSaveService, event_log_repo: EventLogRepository):
         """Should log an event on save_draft (report.created for new, draft.saved for update)."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         saved = auto_save.save_draft(report, telegram_user="user1")
         events = event_log_repo.get_by_object("report", saved.id)
         assert len(events) >= 1, "Should have at least 1 event"
@@ -254,7 +254,7 @@ class TestAutoSaveService:
 
     def test_auto_save_item_logs_event(self, auto_save: AutoSaveService, event_log_repo: EventLogRepository):
         """Should log an event on auto_save_item."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         item = ReportItem(contractor="Civil", workers=10)
         saved = auto_save.auto_save_item(report, item, telegram_user="user1")
         events = event_log_repo.get_by_object("report", saved.id)
@@ -263,12 +263,12 @@ class TestAutoSaveService:
         assert any(e.action in ("report.created", "draft.saved") for e in events)
 
     # ------------------------------------------------------------------
-    # Crash Resilience â€” verify_session_consistency
+    # Crash Resilience — verify_session_consistency
     # ------------------------------------------------------------------
 
     def test_verify_consistent(self, auto_save: AutoSaveService):
         """Should report consistent when session matches DB."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         report.add_item(ReportItem(contractor="Civil", workers=10))
         saved = auto_save.save_draft(report, telegram_user="user1")
 
@@ -291,7 +291,7 @@ class TestAutoSaveService:
 
     def test_verify_mismatched_contractors(self, auto_save: AutoSaveService):
         """Should report inconsistency when contractor counts differ."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         report.add_item(ReportItem(contractor="Civil", workers=10))
         auto_save.save_draft(report, telegram_user="user1")
 
@@ -318,28 +318,28 @@ class TestAutoSaveService:
 
     def test_save_draft_preserves_telegram_user(self, auto_save: AutoSaveService):
         """Should preserve the original telegram_user when updating."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="original_user")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="original_user")
         saved = auto_save.save_draft(report, telegram_user="original_user")
 
         # Update with new Report object (no telegram_user set)
-        update = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª")
+        update = Report(date="2026-07-11", day="السبت")
         update.add_item(ReportItem(contractor="Civil", workers=10))
 
-        # This goes through _update_existing â€” should keep original telegram_user
+        # This goes through _update_existing — should keep original telegram_user
         result = auto_save.save_draft(update, telegram_user="original_user")
         assert result.telegram_user == "original_user"
         assert result.status == ReportStatus.DRAFT
 
     def test_save_draft_empty_items(self, auto_save: AutoSaveService):
         """Should save a report with no items."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         saved = auto_save.save_draft(report, telegram_user="user1")
         assert saved.id is not None
         assert len(saved.items) == 0
 
     def test_save_draft_idempotent(self, auto_save: AutoSaveService):
         """Saving the same report twice should not duplicate."""
-        report = Report(date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª", telegram_user="user1")
+        report = Report(date="2026-07-11", day="السبت", telegram_user="user1")
         saved = auto_save.save_draft(report, telegram_user="user1")
         saved2 = auto_save.save_draft(saved, telegram_user="user1")
         assert saved2.id == saved.id

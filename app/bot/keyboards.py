@@ -339,4 +339,4 @@ def contractor_selection_keyboard_for_report(contractors: list[str], max_per_row
 
 
 # role_manager_keyboard and role_change_keyboard removed in mventor-ticket-031
-# (dead code â€” no handlers were registered for their callback patterns)
+# (dead code — no handlers were registered for their callback patterns)

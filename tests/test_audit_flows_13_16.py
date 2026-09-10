@@ -26,7 +26,7 @@ from tests.test_bot_integration import MockHelpers
 
 
 class TestFlow13_ContractorReports:
-    """Flow 13: Contractor Reports â€” B3 handler from mventor-ticket-031."""
+    """Flow 13: Contractor Reports — B3 handler from mventor-ticket-031."""
 
     @pytest.mark.asyncio
     async def test_13a_contractor_reports_callback(self):

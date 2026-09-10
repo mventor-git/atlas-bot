@@ -48,7 +48,7 @@ class TestContractorProfileService:
     def _seed_data(self, repo: ReportRepository) -> None:
         """Insert test reports with controlled data."""
         # Report 1: 2026-07-01 (Civil Co + Electric Inc)
-        r1 = Report(date="2026-07-01", day="Ø§Ù„Ø§Ø±Ø¨Ø¹Ø§Ø¡", status=ReportStatus.FINAL)
+        r1 = Report(date="2026-07-01", day="الاربعاء", status=ReportStatus.FINAL)
         r1.add_item(ReportItem(contractor="Civil Co", type="Civil", zone="Zone A",
                                 workers=10, details="5 Mason, 5 Helper"))
         r1.add_item(ReportItem(contractor="Electric Inc", type="Electrical", zone="Zone B",
@@ -56,7 +56,7 @@ class TestContractorProfileService:
         repo.add(r1)
 
         # Report 2: 2026-07-05 (Civil Co + Mechanical Co)
-        r2 = Report(date="2026-07-05", day="Ø§Ù„Ø§Ø­Ø¯", status=ReportStatus.FINAL)
+        r2 = Report(date="2026-07-05", day="الاحد", status=ReportStatus.FINAL)
         r2.add_item(ReportItem(contractor="Civil Co", type="Civil", zone="Zone A",
                                 workers=12, details="6 Mason, 6 Helper"))
         r2.add_item(ReportItem(contractor="Mechanical Co", type="Mechanical", zone="Zone C",
@@ -64,7 +64,7 @@ class TestContractorProfileService:
         repo.add(r2)
 
         # Report 3: 2026-07-10 (Civil Co + Civil Co in Zone B)
-        r3 = Report(date="2026-07-10", day="Ø§Ù„Ø®Ù…ÙŠØ³", status=ReportStatus.FINAL)
+        r3 = Report(date="2026-07-10", day="الخميس", status=ReportStatus.FINAL)
         r3.add_item(ReportItem(contractor="Civil Co", type="Civil", zone="Zone B",
                                 workers=8, details="4 Mason, 4 Helper"))
         r3.add_item(ReportItem(contractor="Civil Co", type="Civil", zone="Zone A",
@@ -72,7 +72,7 @@ class TestContractorProfileService:
         repo.add(r3)
 
         # Report 4: 2026-07-15 (Civil Co + Electric Inc with contractor_code)
-        r4 = Report(date="2026-07-15", day="Ø§Ù„Ø«Ù„Ø§Ø«Ø§Ø¡", status=ReportStatus.LOCKED)
+        r4 = Report(date="2026-07-15", day="الثلاثاء", status=ReportStatus.LOCKED)
         r4.add_item(ReportItem(contractor="Civil Co", type="Civil", zone="Zone A",
                                 workers=10, details="5 Mason, 5 Helper",
                                 contractor_code="CIV-001"))
@@ -81,8 +81,8 @@ class TestContractorProfileService:
                                 contractor_code="ELEC-001"))
         repo.add(r4)
 
-        # Report 5: no_report status â€” should be excluded from stats
-        r5 = Report(date="2026-07-20", day="Ø§Ù„Ø§Ø«Ù†ÙŠÙ†", status=ReportStatus.NO_REPORT)
+        # Report 5: no_report status — should be excluded from stats
+        r5 = Report(date="2026-07-20", day="الاثنين", status=ReportStatus.NO_REPORT)
         r5.add_item(ReportItem(contractor="Civil Co", zone="Zone A", workers=5))
         repo.add(r5)
 
@@ -238,7 +238,7 @@ class TestContractorProfileService:
         self._seed_data(repo)
 
         # Add a report with many zones for Civil Co
-        r = Report(date="2026-07-25", day="Ø§Ù„Ø³Ø¨Øª", status=ReportStatus.FINAL)
+        r = Report(date="2026-07-25", day="السبت", status=ReportStatus.FINAL)
         r.add_item(ReportItem(contractor="Civil Co", zone="Zone X", workers=5))
         r.add_item(ReportItem(contractor="Civil Co", zone="Zone Y", workers=5))
         r.add_item(ReportItem(contractor="Civil Co", zone="Zone Z", workers=5))
@@ -259,7 +259,7 @@ class TestContractorProfileService:
 
         service = ContractorProfileService(db_manager)
 
-        # Civil Co: July 2026 only â€” 46 workers across 4 reports
+        # Civil Co: July 2026 only — 46 workers across 4 reports
         profile = service.get_profile("Civil Co")
         assert profile is not None
         assert len(profile.monthly_activity) >= 1
@@ -274,7 +274,7 @@ class TestContractorProfileService:
         # Add another report in a different month for Civil Co
         from app.repositories.report_repository import ReportRepository
         repo2 = ReportRepository(db_manager)
-        r = Report(date="2026-06-15", day="Ø§Ù„Ø§Ø«Ù†ÙŠÙ†", status=ReportStatus.FINAL)
+        r = Report(date="2026-06-15", day="الاثنين", status=ReportStatus.FINAL)
         r.add_item(ReportItem(contractor="Civil Co", zone="Zone A", workers=20))
         repo2.add(r)
 

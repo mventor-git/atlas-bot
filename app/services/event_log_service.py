@@ -1,5 +1,5 @@
 ﻿"""
-Event Log Service â€” High-level audit trail facade. (mventor-ticket-023)
+Event Log Service — High-level audit trail facade. (mventor-ticket-023)
 
 Provides convenience methods for logging common actions without
 manually constructing EventLogEntry objects. Wraps EventLogRepository

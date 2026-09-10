@@ -56,7 +56,7 @@ class TestOneClickYesterdayService:
 
     @pytest.fixture
     def today_day(self) -> str:
-        return "Ø§Ù„Ø³Ø¨Øª"
+        return "السبت"
 
     # ------------------------------------------------------------------
     # Successful copy
@@ -69,7 +69,7 @@ class TestOneClickYesterdayService:
         """Should copy all items from yesterday's report to today's draft."""
         # Create yesterday's report with items
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="user1",
         )
         yesterday.add_item(ReportItem(
@@ -107,7 +107,7 @@ class TestOneClickYesterdayService:
     ):
         """All item fields (contractor, type, zone, workers, details) should be copied."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="u1",
         )
         yesterday.add_item(ReportItem(
@@ -136,7 +136,7 @@ class TestOneClickYesterdayService:
     ):
         """Yesterday's report in the database should NOT be modified."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="u1",
         )
         yesterday.add_item(ReportItem(contractor="Civil Co", workers=10))
@@ -160,7 +160,7 @@ class TestOneClickYesterdayService:
     ):
         """The new draft should have no ID (not yet persisted)."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="u1",
         )
         yesterday.add_item(ReportItem(contractor="Civil Co", workers=10))
@@ -194,7 +194,7 @@ class TestOneClickYesterdayService:
     ):
         """Should return None when yesterday is a no_report day."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.NO_REPORT, telegram_user="u1",
         )
         repo.add(yesterday)
@@ -212,7 +212,7 @@ class TestOneClickYesterdayService:
     ):
         """Should copy empty items list when yesterday has no items."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         repo.add(yesterday)
@@ -229,7 +229,7 @@ class TestOneClickYesterdayService:
     ):
         """Should copy from a DRAFT yesterday (not just FINAL)."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         yesterday.add_item(ReportItem(contractor="Draft Co", workers=3))
@@ -248,7 +248,7 @@ class TestOneClickYesterdayService:
     ):
         """Should copy from a LOCKED yesterday (read-only is fine for copy)."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.LOCKED, telegram_user="u1",
             locked_by="admin",
         )
@@ -272,7 +272,7 @@ class TestOneClickYesterdayService:
     ):
         """Items should be copied in the same order as yesterday."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="u1",
         )
         contractors = ["Alpha Co", "Beta Inc", "Gamma LLC", "Delta Corp"]
@@ -297,7 +297,7 @@ class TestOneClickYesterdayService:
     ):
         """Should handle items with None fields gracefully."""
         yesterday = Report(
-            date=yesterday_date, day="Ø§Ù„Ø®Ù…ÙŠØ³",
+            date=yesterday_date, day="الخميس",
             status=ReportStatus.FINAL, telegram_user="u1",
         )
         yesterday.add_item(ReportItem(

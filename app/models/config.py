@@ -47,16 +47,16 @@ class TableColumnConfig(BaseModel):
 
     NOTE: Column A is unusable in the template, so serial starts at B.
     Columns map to the tblReport headers:
-      B=Ù… (serial), C=Ø§Ø³Ù… Ø§Ù„Ù…Ù‚Ø§ÙˆÙ„ (contractor), D=Ø§Ù„Ø¨Ù†Ø¯ (type),
-      E=Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„ (zone), F=Ø¹Ø¯Ø¯ Ø§Ù„Ø¹Ù…Ø§Ù„ (workers), G=Ø§Ù„Ø¹Ø¯Ø¯ Ø§Ù„ØªÙØµÙŠÙ„ÙŠ (details)
+      B=م (serial), C=اسم المقاول (contractor), D=البند (type),
+      E=مكان العمل (zone), F=عدد العمال (workers), G=العدد Ø§Ù„ØªÙØµÙŠÙ„ÙŠ (details)
     """
 
-    serial: str = Field("B", description="Column B = 'Ù…' (serial number â€” A is unusable)")
-    contractor: str = Field("C", description="Column C = 'Ø§Ø³Ù… Ø§Ù„Ù…Ù‚Ø§ÙˆÙ„' (contractor name)")
-    type: str = Field("D", description="Column D = 'Ø§Ù„Ø¨Ù†Ø¯' (contractor type/item)")
-    zone: str = Field("E", description="Column E = 'Ù…ÙƒØ§Ù† Ø§Ù„Ø¹Ù…Ù„' (work zone)")
-    workers: str = Field("F", description="Column F = 'Ø¹Ø¯Ø¯ Ø§Ù„Ø¹Ù…Ø§Ù„' (workers count)")
-    details: str = Field("G", description="Column G = 'Ø§Ù„Ø¹Ø¯Ø¯ Ø§Ù„ØªÙØµÙŠÙ„ÙŠ' (detailed count)")
+    serial: str = Field("B", description="Column B = 'م' (serial number — A is unusable)")
+    contractor: str = Field("C", description="Column C = 'اسم المقاول' (contractor name)")
+    type: str = Field("D", description="Column D = 'البند' (contractor type/item)")
+    zone: str = Field("E", description="Column E = 'مكان العمل' (work zone)")
+    workers: str = Field("F", description="Column F = 'عدد العمال' (workers count)")
+    details: str = Field("G", description="Column G = 'العدد Ø§Ù„ØªÙØµÙŠÙ„ÙŠ' (detailed count)")
 
 
 class TableConfig(BaseModel):
@@ -139,7 +139,7 @@ class LifecycleConfig(BaseModel):
 
 
 class ValidationConfig(BaseModel):
-    """Validation rules configuration. (NEW v2.0 â€” mventor-ticket-013)"""
+    """Validation rules configuration. (NEW v2.0 — mventor-ticket-013)"""
 
     max_workers_per_contractor: int = Field(100, description="Warn if exceeded", ge=1)
     max_contractors_per_report: int = Field(50, description="Warn if exceeded", ge=1)
@@ -262,10 +262,10 @@ class AppConfig(BaseModel):
     statistics: StatisticsConfig = Field(default_factory=StatisticsConfig)      # NEW v2.0
     reporting_window: ReportingWindowConfig = Field(default_factory=ReportingWindowConfig)  # NEW
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)        # NEW v2.0
-    suggestions: SuggestionsConfig = Field(default_factory=SuggestionsConfig)  # NEW v2.0 â€” mventor-ticket-009
+    suggestions: SuggestionsConfig = Field(default_factory=SuggestionsConfig)  # NEW v2.0 — mventor-ticket-009
     timezone: TimezoneConfig = Field(default_factory=TimezoneConfig)          # NEW
     notification: NotificationConfig = Field(default_factory=NotificationConfig)  # NEW
-    auth: dict = Field(default_factory=dict)  # NEW v3.0 â€” loaded from config.yaml
+    auth: dict = Field(default_factory=dict)  # NEW v3.0 — loaded from config.yaml
     project: ProjectConfig = Field(default_factory=ProjectConfig)  # NEW
 
     @property

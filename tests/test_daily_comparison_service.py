@@ -191,7 +191,7 @@ class TestDailyComparisonService:
 
     @pytest.fixture
     def seeded_one_report(self, report_repo: ReportRepository):
-        """Seed only one report â€” the other date has none."""
+        """Seed only one report — the other date has none."""
         r = Report(
             date="2026-07-10",
             day="Friday",
@@ -369,7 +369,7 @@ class TestDailyComparisonService:
         report_repo.add(r_b)
 
         result = service.compare("2026-07-10", "2026-07-11")
-        # Report A: 10 + 0 (Noneâ†’0) + 0 = 10
+        # Report A: 10 + 0 (None→0) + 0 = 10
         assert result.worker_count_a == 10
         # Report B: 15 + 5 = 20
         assert result.worker_count_b == 20

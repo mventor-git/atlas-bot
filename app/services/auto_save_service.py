@@ -1,7 +1,7 @@
 ﻿"""Auto Save Service for Labor-Report. (mventor-ticket-008)
 
 Automatically persists every modification to the database immediately.
-No explicit "save" button needed â€” every action triggers a save.
+No explicit "save" button needed — every action triggers a save.
 SQLite WAL mode ensures crash resilience for committed writes.
 
 Usage:
@@ -73,7 +73,7 @@ class AutoSaveService:
         if report.id is not None:
             return self._repo.update(report)
 
-        # No ID â€” check if a report already exists for this date
+        # No ID — check if a report already exists for this date
         existing = self._repo.get_by_date(report.date)
         if existing is not None:
             return self._update_existing(existing, report, now)

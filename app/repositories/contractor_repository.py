@@ -52,7 +52,7 @@ class ContractorRepository:
                 type=ctype,
             )
         except Exception:
-            # UNIQUE constraint violation â€” name already exists
+            # UNIQUE constraint violation — name already exists
             logger.debug("Contractor '%s' already exists (or DB error)", name)
             return None
 

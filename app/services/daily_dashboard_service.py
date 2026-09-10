@@ -7,7 +7,7 @@ countdown, and context-sensitive quick action buttons.
 Typical usage:
     service = DailyDashboardService(report_repo, config)
     dashboard = service.get_dashboard(telegram_user="user123")
-    # dashboard.date -> "Ù¡Ù¥ / Ù Ù¨ / Ù¢Ù Ù¢Ù¦"
+    # dashboard.date -> "١٥ / ٠٨ / ٢٠٢٦"
     # dashboard.buttons -> ["Open Draft", "Search"]
 """
 
@@ -33,10 +33,10 @@ class DashboardData:
     """
 
     date: str
-    """Today's date in Arabic-Indic digits (e.g. 'Ù¡Ù¥ / Ù Ù¨ / Ù¢Ù Ù¢Ù¦')."""
+    """Today's date in Arabic-Indic digits (e.g. '١٥ / ٠٨ / ٢٠٢٦')."""
 
     day: str
-    """Arabic day name (e.g. 'Ø§Ù„Ø³Ø¨Øª')."""
+    """Arabic day name (e.g. 'السبت')."""
 
     time: str
     """Current server time formatted as HH:MM."""

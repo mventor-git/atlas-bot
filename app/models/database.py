@@ -64,10 +64,10 @@ class ReportStatus(str, Enum):
     """Report is being edited (freely modifiable). (NEW v2.0)"""
 
     FINAL = "final"
-    """Official report â€” read-only, PDF generated. (NEW v2.0, replaces GENERATED)"""
+    """Official report — read-only, PDF generated. (NEW v2.0, replaces GENERATED)"""
 
     LOCKED = "locked"
-    """Permanently read-only â€” admin may unlock. (NEW v2.0)"""
+    """Permanently read-only — admin may unlock. (NEW v2.0)"""
 
     NO_REPORT = "no_report"
     """No labor report for this date (recorded as absence)."""
@@ -122,7 +122,7 @@ class Report:
     """Report date in YYYY-MM-DD format."""
 
     day: str
-    """Day name in Arabic (e.g., 'Ø§Ù„Ø§Ø«Ù†ÙŠÙ†')."""
+    """Day name in Arabic (e.g., 'الاثنين')."""
 
     status: ReportStatus = ReportStatus.DRAFT
     """Report lifecycle status: draft, final, locked, or no_report."""
@@ -137,7 +137,7 @@ class Report:
     """Path to the generated Excel file."""
 
     preview_pdf_path: Optional[str] = None
-    """Path to the preview PDF (v2.0 â€” mventor-ticket-011)."""
+    """Path to the preview PDF (v2.0 — mventor-ticket-011)."""
 
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     """ISO datetime when the report was created."""
@@ -285,10 +285,10 @@ class UserSession:
     """In-session data accumulated during the conversation.
 
     Typical keys:
-        - date: str â€” selected report date (YYYY-MM-DD)
-        - day: str â€” Arabic day name
-        - contractors: list[dict] â€” selected contractors with workers
-        - current_search: list[str] â€” last search results
+        - date: str — selected report date (YYYY-MM-DD)
+        - day: str — Arabic day name
+        - contractors: list[dict] — selected contractors with workers
+        - current_search: list[str] — last search results
     """
 
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())

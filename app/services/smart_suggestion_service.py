@@ -4,7 +4,7 @@ Provides relevance-ordered contractor suggestions when the user is adding
 contractors to a report. Ordering: Favorites > Recently Used > Frequently
 Used > Yesterday's Contractors > All Others.
 
-No AI model required â€” pure SQL + business logic scoring.
+No AI model required — pure SQL + business logic scoring.
 """
 
 from datetime import datetime, timedelta
