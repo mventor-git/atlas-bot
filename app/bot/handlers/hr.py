@@ -353,7 +353,6 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data or ""
     chat_id, name = _me(update)
     role = _role(update, context)
-    service = _hr(context)
 
     if data == "hr_new_advance":
         await _start_flow(update, context, HRRequestType.ADVANCE)
@@ -370,8 +369,13 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     parts = data.split(":")
+    if parts[0] in ("hr_sites", "hr_site", "hr_print", "hr_notify"):
+        if await handle_board_callback(update, context, parts[0], parts):
+            return
+
     if len(parts) < 2:
         return
+    service = _hr(context)
     action = parts[0]
     try:
         req_id = int(parts[-1])
@@ -457,6 +461,175 @@ def get_registration_handlers() -> list:
         CommandHandler("hr_my", my_requests_command),
         CommandHandler("hr_pending", pending_command),
         CommandHandler("hr_skip", handle_hr_skip),
+        CommandHandler("hr_sites", sites_command),
+        CommandHandler("hr_print_all", print_all_command),
+        CommandHandler("hr_setsite", set_site_command),
         CallbackQueryHandler(handle_hr_callback, pattern="^hr_"),
         MessageHandler(filters.PHOTO, handle_hr_receipt),
     ]
+
+
+# --- HR site board (006-E) ---
+
+def _require_hr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return _role(update, context) in ("superadmin", "hr")
+
+
+def _sites(config) -> list:
+    raw = getattr(config, "sites", None) or []
+    return [{"id": str(s.get("id")), "name": s.get("name", s.get("id"))}
+            for s in raw if isinstance(s, dict) and s.get("id")]
+
+
+async def sites_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """HR site board entry: pick a site."""
+    if not _require_hr(update, context):
+        await update.effective_message.reply_text("Site board is for HR only.")
+        return
+    sites = _sites(context.bot_data["app_config"])
+    if not sites:
+        await update.effective_message.reply_text("No sites configured.")
+        return
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(s["name"], callback_data=f"hr_site:{s['id']}")]
+        for s in sites
+    ])
+    await update.effective_message.reply_text("Pick a site:", reply_markup=keyboard)
+
+
+async def print_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Queue today's reports for every site that has one."""
+    if not _require_hr(update, context):
+        await update.effective_message.reply_text("Print-all is for HR only.")
+        return
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+    sites = _sites(context.bot_data["app_config"])
+    printed, missing = [], []
+    for site in sites:
+        pdf = _ensure_report_pdf(context, today, site["id"])
+        if pdf:
+            printed.append(site["name"])
+        else:
+            missing.append(site["name"])
+    await update.effective_message.reply_text(
+        "Printed: %s\nMissing: %s" % (", ".join(printed) or "-", ", ".join(missing) or "-")
+    )
+
+
+async def set_site_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Assign a user to a site: /hr_setsite <chat_id> <site_id>."""
+    if _role(update, context) not in ("superadmin", "hr"):
+        await update.message.reply_text("Only HR/superadmin can assign sites.")
+        return
+    parts = (update.message.text or "").split()
+    if len(parts) != 3:
+        await update.message.reply_text("Usage: /hr_setsite <chat_id> <site_id>")
+        return
+    _, chat_id, site_id = parts
+    from app.repositories.user_repository import UserRepository  # noqa
+
+    user_repo = context.bot_data.get("user_repository")
+    if user_repo is None:
+        await update.message.reply_text("User store unavailable.")
+        return
+    user = user_repo.set_site(chat_id, site_id)
+    if user is None:
+        await update.message.reply_text(f"User {chat_id} not found.")
+        return
+    await update.message.reply_text(f"User {chat_id} assigned to site {site_id}.")
+
+
+def _ensure_report_pdf(context: ContextTypes.DEFAULT_TYPE, date_str: str, site_id: str):
+    """Return a queued PDF path for a site report, generating if needed."""
+    from app.libre.filler import TemplateFiller
+    from app.libre.hr_fill import queue_for_print
+    from app.libre.pdf import PDFGenerator
+
+    config = context.bot_data["app_config"]
+    repo = context.bot_data["report_repository"]
+    report = repo.get_by_date(date_str, site_id=site_id)
+    if report is None:
+        return None
+    if report.pdf_path and Path(report.pdf_path).exists():
+        return queue_for_print(report.pdf_path)
+    filled = TemplateFiller(config).fill(report)
+    pdf = PDFGenerator(config).convert_to_pdf(filled)
+    report.pdf_path = pdf
+    try:
+        repo.update(report, force=True)
+    except Exception:
+        pass
+    return queue_for_print(pdf)
+
+
+async def handle_board_callback(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                action: str, parts: list) -> bool:
+    """Site-board callbacks. Returns True if handled."""
+    from datetime import date as _date
+
+    query = update.callback_query
+    if action == "hr_sites":
+        await sites_command(update, context)
+        return True
+    if action == "hr_site":
+        if not _require_hr(update, context):
+            await query.edit_message_text("Site board is for HR only.")
+            return True
+        site_id = parts[1]
+        today = _date.today().isoformat()
+        repo = context.bot_data["report_repository"]
+        report = repo.get_by_date(today, site_id=site_id)
+        if report is None:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("Notify site", callback_data=f"hr_notify:{site_id}"),
+            ]])
+            await query.edit_message_text(
+                f"Site `{site_id}` - no report for {today}.", reply_markup=keyboard)
+        else:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("Print", callback_data=f"hr_print:{today}:{site_id}"),
+            ]])
+            await query.edit_message_text(
+                f"Site `{site_id}` - report `{report.status.value}` "
+                f"({len(report.items or [])} items).",
+                reply_markup=keyboard, parse_mode="Markdown")
+        return True
+    if action == "hr_print":
+        if not _require_hr(update, context):
+            await query.edit_message_text("Printing is for HR only.")
+            return True
+        _, date_str, site_id = parts[0], parts[1], parts[2]
+        try:
+            queued = _ensure_report_pdf(context, date_str, site_id)
+        except Exception as e:
+            logger.warning("Board print failed: %s", e)
+            queued = None
+        await query.edit_message_text(
+            f"Queued for print: `{queued}`" if queued else "Nothing to print.")
+        return True
+    if action == "hr_notify":
+        if not _require_hr(update, context):
+            await query.edit_message_text("Notify is for HR only.")
+            return True
+        site_id = parts[1]
+        user_repo = context.bot_data.get("user_repository")
+        if user_repo is None:
+            await query.edit_message_text("User store unavailable.")
+            return True
+        sent, total = 0, 0
+        for user in user_repo.get_users_by_site(site_id):
+            if user.role in ("pending", "rejected"):
+                continue
+            total += 1
+            try:
+                await context.bot.send_message(
+                    chat_id=int(user.chat_id),
+                    text=f"Reminder: no labor report for today ({site_id}). File it now.")
+                sent += 1
+            except Exception as e:
+                logger.warning("Notify failed for %s: %s", user.chat_id, e)
+        await query.edit_message_text(f"Notified {sent}/{total} employees of `{site_id}`.")
+        return True
+    return False

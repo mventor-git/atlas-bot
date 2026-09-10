@@ -292,6 +292,7 @@ def main() -> None:
             add_contractor_service=add_contractor_service,
             daily_comparison_service=daily_comparison_service,
             hr_service=hr_service,
+            user_repository=user_repo,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop

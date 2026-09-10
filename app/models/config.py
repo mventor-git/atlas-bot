@@ -242,6 +242,13 @@ class AppConfig(BaseModel):
 
     template: TemplateConfig = Field(default_factory=TemplateConfig)
     language: str = Field("en", description="Document language: en (LTR) or ar (RTL)")
+    sites: list = Field(
+        default_factory=lambda: [
+            {"id": "main", "name": "Main Site"},
+            {"id": "hq", "name": "Headquarters"},
+        ],
+        description="Deployment sites (dev-managed)",
+    )
     date: dict = Field(default_factory=lambda: {"cell": "B7", "day_cell": "B5"})
     table: TableConfig = Field(default_factory=TableConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)

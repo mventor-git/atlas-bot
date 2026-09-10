@@ -419,6 +419,9 @@ class User:
     approved_at: Optional[str] = None
     """ISO datetime of approval."""
 
+    site_id: Optional[str] = None
+    """Assigned site (multi-site notify/print targeting; env SITE_ID when unset)."""
+
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     """ISO datetime of last update."""
 

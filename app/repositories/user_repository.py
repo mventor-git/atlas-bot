@@ -7,6 +7,7 @@ Manages Telegram users and their roles (super_admin, admin, user, pending, rejec
 from datetime import datetime
 from typing import Optional
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.models.database import User
 from app.utils.exceptions import DatabaseError
@@ -138,15 +139,17 @@ class UserRepository:
         else:
             cursor = self._db.execute(
                 """INSERT INTO users
-                    (chat_id, role, username, first_name, created_at,
+                    (chat_id, role, username, first_name, site_id, created_at,
                      approved_by, approved_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     user.chat_id, user.role, user.username, user.first_name,
+                    user.site_id or "default",
                     user.created_at, user.approved_by, user.approved_at, now,
                 ),
             )
             user.id = cursor.lastrowid
+            user.site_id = user.site_id or "default"
             logger.debug("Inserted user %s: role=%s", user.chat_id, user.role)
 
         self._db.commit()
@@ -184,6 +187,29 @@ class UserRepository:
         self._db.commit()
 
         logger.info("User %s role changed to %s by %s", chat_id, new_role, approved_by)
+        return user
+
+    def get_users_by_site(self, site_id: str | None = None) -> list[User]:
+        """Get all users assigned to a site, ordered by creation time."""
+        rows = self._db.execute(
+            "SELECT * FROM users WHERE site_id = ? ORDER BY created_at ASC",
+            (site_id or driver.site_id(),),
+        ).fetchall()
+        return [self._row_to_user(row) for row in rows]
+
+    def set_site(self, chat_id: str, site_id: str) -> Optional[User]:
+        """Assign a user to a site."""
+        user = self.get_by_chat_id(chat_id)
+        if user is None:
+            return None
+        user.site_id = site_id
+        user.updated_at = datetime.now().isoformat()
+        self._db.execute(
+            "UPDATE users SET site_id = ?, updated_at = ? WHERE chat_id = ?",
+            (site_id, user.updated_at, chat_id),
+        )
+        self._db.commit()
+        logger.info("User %s assigned to site %s", chat_id, site_id)
         return user
 
     def delete(self, chat_id: str) -> bool:
@@ -229,5 +255,6 @@ class UserRepository:
             created_at=row["created_at"],
             approved_by=self._safe_get(row, "approved_by"),
             approved_at=self._safe_get(row, "approved_at"),
+            site_id=self._safe_get(row, "site_id") or "default",
             updated_at=row["updated_at"],
         )

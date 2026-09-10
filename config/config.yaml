@@ -7,6 +7,13 @@
 # Document language: en (LTR) or ar (RTL) - set per deployment
 language: "en"
 
+# Deployment sites (dev-managed; each site bot sets its SITE_ID)
+sites:
+  - id: "main"
+    name: "Main Site"
+  - id: "hq"
+    name: "Headquarters"
+
 # Template settings
 template:
   # Path to the tables file containing contractor and zone data
