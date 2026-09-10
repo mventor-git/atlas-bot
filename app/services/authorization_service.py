@@ -31,6 +31,8 @@ class AuthorizationService:
     CAN_FINALIZE_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr")
     CAN_MANAGE_USERS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr")
     CAN_PROMOTE_ROLES = ("superadmin", "project_manager")
+    CAN_CONFIRM_PM_ROLES = ("superadmin", "project_manager")
+    CAN_APPROVE_HR_ROLES = ("superadmin", "hr")
     CAN_CREATE_REPORTS_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user")
     CAN_VIEW_ROLES = ("superadmin", "project_manager", "executive_engineer", "admin", "hr", "normal_user", "viewer")
 
@@ -175,6 +177,14 @@ class AuthorizationService:
             True for the superadmin and project_manager role.
         """
         return self.is_super_admin(chat_id) or self.get_role(chat_id) == "project_manager"
+
+    def can_confirm_pm(self, chat_id: str) -> bool:
+        """Check if a user can PM-confirm HR requests (gate 1)."""
+        return self.get_role(chat_id) in self.CAN_CONFIRM_PM_ROLES
+
+    def can_approve_hr(self, chat_id: str) -> bool:
+        """Check if a user can HR-decide requests (gate 2, final)."""
+        return self.get_role(chat_id) in self.CAN_APPROVE_HR_ROLES
 
     # --- User management ---
 

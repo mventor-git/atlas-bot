@@ -54,6 +54,7 @@ def create_bot_app(
     add_contractor_service=None,
     notification_manager=None,
     daily_comparison_service=None,
+    hr_service=None,
 ) -> Application:
     """Create and configure the Telegram bot application.
 
@@ -89,6 +90,7 @@ def create_bot_app(
     app.bot_data["add_contractor_service"] = add_contractor_service
     app.bot_data["notification_manager"] = notification_manager
     app.bot_data["daily_comparison_service"] = daily_comparison_service
+    app.bot_data["hr_service"] = hr_service
     app.bot_data["app_config"] = app_config
 
     logger.info(
@@ -110,12 +112,14 @@ def _register_handlers(app: Application) -> None:
     from app.bot.handlers.admin_users import get_registration_handlers as get_admin_users_handlers
     from app.bot.handlers.report_retrieval import get_registration_handlers as get_retrieval_handlers
     from app.bot.handlers.comparison import get_registration_handlers as get_comparison_handlers
+    from app.bot.handlers.hr import get_registration_handlers as get_hr_handlers
 
     handlers = []
     handlers.extend(get_start_handlers())
     handlers.extend(get_report_handlers())
     handlers.extend(get_search_handlers())
     handlers.extend(get_comparison_handlers())
+    handlers.extend(get_hr_handlers())
     handlers.extend(get_admin_handlers())
     handlers.extend(get_admin_users_handlers())
     handlers.extend(get_retrieval_handlers())

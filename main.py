@@ -31,6 +31,7 @@ if str(_project_root) not in sys.path:
 from app.config.loader import ConfigLoader, ConfigurationError
 from app.database.manager import DatabaseManager
 from app.repositories.report_repository import ReportRepository
+from app.repositories.hr_repository import HRRepository
 from app.repositories.recent_contractor_repository import RecentContractorRepository
 from app.repositories.event_log_repository import EventLogRepository
 from app.repositories.search_repository import SearchRepository
@@ -48,6 +49,7 @@ from app.services.universal_search_service import UniversalSearchService
 from app.services.arabic_date_service import ArabicDateService
 from app.services.validation_service import ValidationService
 from app.services.add_contractor_service import AddContractorService
+from app.services.hr_service import HRService
 from app.services.audit_service import AuditService
 from app.libre.filler import TemplateFiller
 from app.libre.pdf import PDFGenerator
@@ -253,6 +255,7 @@ def main() -> None:
         audit_service = AuditService(db_manager)
         add_contractor_service = AddContractorService(contractor_repo, audit_service)  # mventor-ticket-036
         daily_comparison_service = DailyComparisonService(report_repo_with_events)  # mventor-ticket-019
+        hr_service = HRService(HRRepository(db_manager))  # HR advances + transport
 
         logger.info("All services initialized.")
 
@@ -288,6 +291,7 @@ def main() -> None:
             audit_service=audit_service,
             add_contractor_service=add_contractor_service,
             daily_comparison_service=daily_comparison_service,
+            hr_service=hr_service,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop
