@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.database.manager import DatabaseManager
+from app.database import driver
 from app.models.database import EventLogEntry
 from app.repositories.base import BaseRepository
 from app.utils.exceptions import DatabaseError
@@ -241,14 +242,17 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
         return [self._row_to_model(row) for row in rows]
 
     def add(self, entity: EventLogEntry) -> EventLogEntry:
+        site = entity.site_id or driver.site_id()
+        entity.site_id = site
         cursor = self._db.execute(
             """INSERT INTO event_log
-               (timestamp, telegram_user, action, object_type, object_id,
+               (timestamp, telegram_user, site_id, action, object_type, object_id,
                 object_date, old_value, new_value)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entity.timestamp,
                 entity.telegram_user,
+                site,
                 entity.action,
                 entity.object_type,
                 entity.object_id,
@@ -279,6 +283,7 @@ class EventLogRepository(BaseRepository[EventLogEntry]):
             id=row["id"],
             timestamp=row["timestamp"],
             telegram_user=row["telegram_user"],
+            site_id=row["site_id"] or "default" if "site_id" in row.keys() else "default",
             action=row["action"],
             object_type=row["object_type"],
             object_id=row["object_id"],

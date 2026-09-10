@@ -10,18 +10,27 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from app.database import driver
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+try:
+    import psycopg2
+
+    _DB_ERRORS = (sqlite3.Error, psycopg2.Error)
+except ImportError:  # Postgres driver optional; SQLite always works
+    _DB_ERRORS = (sqlite3.Error,)
 
 # Schema definition for the reports database (v2.0)
 SCHEMA_SQL = """
 -- Core reports table (v2.0: extended lifecycle fields)
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL UNIQUE,
+    date TEXT NOT NULL,
     day TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
     status TEXT NOT NULL DEFAULT 'draft'
         CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
     pdf_path TEXT,
@@ -33,7 +42,8 @@ CREATE TABLE IF NOT EXISTS reports (
     finalized_at TEXT,
     locked_at TEXT,
     locked_by TEXT,
-    source_date TEXT
+    source_date TEXT,
+    UNIQUE(date, site_id)
 );
 
 -- Report items (contractor rows)
@@ -67,6 +77,7 @@ CREATE TABLE IF NOT EXISTS event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     telegram_user TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
     action TEXT NOT NULL,
     object_type TEXT,
     object_id INTEGER,
@@ -128,7 +139,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT NOT NULL UNIQUE,
     role TEXT NOT NULL DEFAULT 'pending'
-        CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'normal_user', 'viewer', 'pending', 'rejected')),
+        CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
     username TEXT,
     first_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -152,6 +163,136 @@ CREATE TABLE IF NOT EXISTS contractors (
 CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
 """
 
+# Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
+# Kept explicit (not generated) for auditability.
+PG_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS reports (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    day TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
+    pdf_path TEXT,
+    excel_path TEXT,
+    preview_pdf_path TEXT,
+    telegram_user TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    finalized_at TEXT,
+    locked_at TEXT,
+    locked_by TEXT,
+    source_date TEXT,
+    UNIQUE(date, site_id)
+);
+
+CREATE TABLE IF NOT EXISTS report_items (
+    id SERIAL PRIMARY KEY,
+    report_id INTEGER NOT NULL,
+    contractor TEXT NOT NULL,
+    type TEXT,
+    zone TEXT,
+    workers INTEGER,
+    details TEXT,
+    contractor_code TEXT,
+    FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS report_versions (
+    id SERIAL PRIMARY KEY,
+    report_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    snapshot TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    change_summary TEXT,
+    FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+    UNIQUE(report_id, version_number)
+);
+
+CREATE TABLE IF NOT EXISTS event_log (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    telegram_user TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    action TEXT NOT NULL,
+    object_type TEXT,
+    object_id INTEGER,
+    object_date TEXT,
+    old_value TEXT,
+    new_value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS favorites (
+    id SERIAL PRIMARY KEY,
+    telegram_user TEXT NOT NULL,
+    contractor_name TEXT NOT NULL,
+    contractor_code TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(telegram_user, contractor_name)
+);
+
+CREATE TABLE IF NOT EXISTS stats_cache (
+    id SERIAL PRIMARY KEY,
+    period TEXT NOT NULL,
+    period_key TEXT NOT NULL,
+    data TEXT NOT NULL,
+    computed_at TEXT NOT NULL,
+    UNIQUE(period, period_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(date);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+CREATE INDEX IF NOT EXISTS idx_reports_site ON reports(site_id);
+CREATE INDEX IF NOT EXISTS idx_reports_date_status ON reports(date, status);
+CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(telegram_user);
+
+CREATE INDEX IF NOT EXISTS idx_report_items_report_id ON report_items(report_id);
+CREATE INDEX IF NOT EXISTS idx_report_items_contractor ON report_items(contractor);
+CREATE INDEX IF NOT EXISTS idx_report_items_type ON report_items(type);
+CREATE INDEX IF NOT EXISTS idx_report_items_zone ON report_items(zone);
+CREATE INDEX IF NOT EXISTS idx_report_items_workers ON report_items(workers);
+
+CREATE INDEX IF NOT EXISTS idx_versions_report_id ON report_versions(report_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON event_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_user ON event_log(telegram_user);
+CREATE INDEX IF NOT EXISTS idx_events_site ON event_log(site_id);
+CREATE INDEX IF NOT EXISTS idx_events_action ON event_log(action);
+CREATE INDEX IF NOT EXISTS idx_events_object ON event_log(object_type, object_id);
+
+CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(telegram_user);
+
+CREATE INDEX IF NOT EXISTS idx_stats_period ON stats_cache(period, period_key);
+
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL DEFAULT 'pending'
+        CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
+    username TEXT,
+    first_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (now()),
+    approved_by TEXT,
+    approved_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+CREATE TABLE IF NOT EXISTS contractors (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT,
+    added_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (now()),
+    UNIQUE(LOWER(name))
+);
+
+CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
+"""
+
 
 class DatabaseManager:
     """Manages SQLite database connection and schema.
@@ -169,56 +310,86 @@ class DatabaseManager:
     def __init__(self, db_path: str | Path) -> None:
         """Initialize the database manager.
 
+        Backend: SQLite file by default; Postgres when the DATABASE_URL
+        environment variable is set. Repositories keep ``?`` placeholders
+        on both backends (translated at execution).
+
         Args:
-            db_path: Path to the SQLite database file.
+            db_path: Path to the SQLite database file (ignored on Postgres,
+                kept for API compatibility).
 
         Raises:
             DatabaseError: If the database directory cannot be created
-                          or schema initialization fails.
+                           or schema initialization fails.
         """
         self._db_path = Path(db_path).resolve()
         self._local = threading.local()
         self._lock = threading.Lock()
+        self._pg = driver.use_postgres()
 
-        # Ensure parent directory exists
-        try:
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            raise DatabaseError(
-                f"Cannot create database directory: {self._db_path.parent}",
-                original_exception=e,
-            ) from e
+        if not self._pg:
+            # Ensure parent directory exists (SQLite only)
+            try:
+                self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise DatabaseError(
+                    f"Cannot create database directory: {self._db_path.parent}",
+                    original_exception=e,
+                ) from e
 
         # Initialize schema on startup (creates new tables/indexes)
         self._init_schema()
 
-        # Run v1.0 → v2.0 migration if needed (adds columns, migrates data)
-        self.run_migration()
+        if not self._pg:
+            # Run v1.0 → v2.0 migration if needed (adds columns, migrates data)
+            self.run_migration()
 
-        # Widen users.role CHECK to include extended roles on existing DBs
-        # (CREATE TABLE IF NOT EXISTS never alters an existing table).
-        self._ensure_extended_roles()
+            # Widen users.role CHECK to include extended roles on existing DBs
+            # (CREATE TABLE IF NOT EXISTS never alters an existing table).
+            self._ensure_extended_roles()
 
-        logger.info("Database initialized: %s", self._db_path)
+        # Tenant scoping columns on both backends (idempotent).
+        self.ensure_site_columns()
+        # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
+        self._ensure_site_uniques()
+
+        logger.info(
+            "Database initialized: %s (backend=%s)",
+            self._db_path if not self._pg else "postgres",
+            "postgres" if self._pg else "sqlite",
+        )
 
     @property
     def db_path(self) -> Path:
         """Get the resolved database file path."""
         return self._db_path
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self):
         """Get a thread-local database connection.
 
         Creates a new connection if one doesn't exist for this thread.
 
         Returns:
-            An active SQLite connection.
+            An active connection (SQLite with WAL + FK, or Postgres).
         """
         if not hasattr(self._local, "connection") or self._local.connection is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
-            conn.row_factory = sqlite3.Row
+            if self._pg:
+                try:
+                    import psycopg2
+                    from psycopg2.extras import RealDictCursor
+                except ImportError as e:
+                    raise DatabaseError(
+                        "psycopg2 is required for Postgres mode. "
+                        "Install it with: pip install psycopg2-binary",
+                        original_exception=e,
+                    ) from e
+                conn = psycopg2.connect(driver.database_url(), cursor_factory=RealDictCursor)
+                conn.autocommit = False
+            else:
+                conn = sqlite3.connect(str(self._db_path))
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.row_factory = sqlite3.Row
             self._local.connection = conn
         return self._local.connection
 
@@ -239,18 +410,124 @@ class DatabaseManager:
             DatabaseError: If schema initialization fails.
         """
         try:
-            conn = self._get_connection()
-            conn.executescript(SCHEMA_SQL)
-            conn.commit()
+            if self._pg:
+                self._exec_statements(PG_SCHEMA_SQL)
+            else:
+                conn = self._get_connection()
+                conn.executescript(SCHEMA_SQL)
+                conn.commit()
             logger.debug("Database schema initialized successfully.")
-        except sqlite3.Error as e:
+        except _DB_ERRORS as e:
             raise DatabaseError(
                 f"Failed to initialize database schema: {e}",
                 original_exception=e,
             ) from e
 
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    def _exec_statements(self, sql: str) -> None:
+        """Execute multi-statement SQL (statement splitter for Postgres)."""
+        conn = self._get_connection()
+        for statement in sql.split(";"):
+            stmt = statement.strip()
+            if stmt:
+                conn.execute(driver.translate(stmt, self._pg))
+        conn.commit()
+
+    def ensure_site_columns(self) -> None:
+        """Add tenant site_id columns to existing tables (idempotent).
+
+        Covers manager-owned tables plus repository-owned ones
+        (user_activity_log, recent_contractors carry site_id in their
+        own DDL and call this after rebuilds).
+        """
+        for table in ("reports", "event_log", "user_activity_log", "recent_contractors"):
+            if not self.table_exists(table):
+                continue  # repository-owned tables are created lazily by repos
+            if not self.column_exists(table, "site_id"):
+                self.execute(
+                    f"ALTER TABLE {table} ADD COLUMN site_id TEXT NOT NULL DEFAULT 'default'"
+                )
+                self.commit()
+                logger.info("Added site_id to %s.", table)
+
+    def _ensure_site_uniques(self) -> None:
+        """Replace global UNIQUE(date) with UNIQUE(date, site_id) on old DBs.
+
+        SQLite-only rebuild (rename → create → copy → drop). No-op on
+        fresh databases and on Postgres (schema already composite).
+        """
+        if self._pg:
+            return
+        row = self.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='reports'"
+        ).fetchone()
+        ddl = row["sql"] or "" if row else ""
+        if row is None or "UNIQUE(date, site_id)" in ddl:
+            return
+        try:
+            conn = self._get_connection()
+            # Disable FK enforcement during the rename: otherwise SQLite
+            # rewrites report_items' FK to reports_old and DROP TABLE
+            # cascades the child rows away.
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("ALTER TABLE reports RENAME TO reports_old")
+            conn.execute(
+                """CREATE TABLE reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
+                    status TEXT NOT NULL DEFAULT 'draft'
+                        CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
+                    pdf_path TEXT,
+                    excel_path TEXT,
+                    preview_pdf_path TEXT,
+                    telegram_user TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    finalized_at TEXT,
+                    locked_at TEXT,
+                    locked_by TEXT,
+                    source_date TEXT,
+                    UNIQUE(date, site_id)
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO reports
+                    (id, date, day, site_id, status, pdf_path, excel_path,
+                     preview_pdf_path, telegram_user, created_at, updated_at,
+                     finalized_at, locked_at, locked_by, source_date)
+                    SELECT id, date, day,
+                     COALESCE(site_id, 'default'), status, pdf_path, excel_path,
+                     preview_pdf_path, telegram_user, created_at, updated_at,
+                     finalized_at, locked_at, locked_by, source_date
+                    FROM reports_old"""
+            )
+            conn.execute("DROP TABLE reports_old")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_site ON reports(site_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_date_status ON reports(date, status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(telegram_user)")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.commit()
+            logger.info("reports uniqueness widened to (date, site_id).")
+        except _DB_ERRORS as e:
+            try:
+                conn.execute("PRAGMA foreign_keys=ON")
+            except _DB_ERRORS:
+                pass
+            conn.rollback()
+            raise DatabaseError(
+                f"Failed to widen reports uniqueness: {e}",
+                original_exception=e,
+            ) from e
+
+    def execute(self, sql: str, params: tuple = ()):
         """Execute a SQL statement.
+
+        ``?`` placeholders are translated for Postgres automatically.
+        On Postgres, plain INSERTs gain ``RETURNING id`` so
+        ``cursor.lastrowid`` keeps working.
 
         Args:
             sql: SQL statement to execute.
@@ -264,11 +541,20 @@ class DatabaseManager:
         """
         try:
             conn = self._get_connection()
-            return conn.execute(sql, params)
-        except sqlite3.Error as e:
+            sql = driver.translate(sql, self._pg)
+            if self._pg:
+                sql = driver.ddl_fixups(sql)
+            returning = driver.needs_returning(sql, self._pg)
+            if returning:
+                sql = sql + " RETURNING id"
+            cursor = conn.execute(sql, params)
+            if returning:
+                return driver.PgCursor(cursor)
+            return cursor
+        except _DB_ERRORS as e:
             raise DatabaseError(f"Database execute error: {e}", original_exception=e) from e
 
-    def executemany(self, sql: str, params_list: list[tuple]) -> sqlite3.Cursor:
+    def executemany(self, sql: str, params_list: list[tuple]):
         """Execute a SQL statement multiple times with different parameters.
 
         Args:
@@ -283,8 +569,8 @@ class DatabaseManager:
         """
         try:
             conn = self._get_connection()
-            return conn.executemany(sql, params_list)
-        except sqlite3.Error as e:
+            return conn.executemany(driver.translate(sql, self._pg), params_list)
+        except _DB_ERRORS as e:
             raise DatabaseError(
                 f"Database executemany error: {e}", original_exception=e
             ) from e
@@ -297,7 +583,7 @@ class DatabaseManager:
         """
         try:
             self._get_connection().commit()
-        except sqlite3.Error as e:
+        except _DB_ERRORS as e:
             raise DatabaseError(f"Database commit error: {e}", original_exception=e) from e
 
     def rollback(self) -> None:
@@ -308,7 +594,7 @@ class DatabaseManager:
         """
         try:
             self._get_connection().rollback()
-        except sqlite3.Error as e:
+        except _DB_ERRORS as e:
             raise DatabaseError(
                 f"Database rollback error: {e}", original_exception=e
             ) from e
@@ -321,17 +607,18 @@ class DatabaseManager:
         preventing PermissionErrors on Windows during temp directory cleanup.
         """
         if hasattr(self._local, "connection") and self._local.connection is not None:
-            try:
-                # Checkpoint WAL and switch to DELETE mode so -wal and -shm
-                # files are removed when the connection closes.
-                self._local.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                self._local.connection.execute("PRAGMA journal_mode=DELETE")
-                self._local.connection.commit()
-            except sqlite3.Error:
-                pass  # Best-effort cleanup
+            if not self._pg:
+                try:
+                    # Checkpoint WAL and switch to DELETE mode so -wal and -shm
+                    # files are removed when the connection closes.
+                    self._local.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    self._local.connection.execute("PRAGMA journal_mode=DELETE")
+                    self._local.connection.commit()
+                except _DB_ERRORS:
+                    pass  # Best-effort cleanup
             try:
                 self._local.connection.close()
-            except sqlite3.Error as e:
+            except _DB_ERRORS as e:
                 logger.warning("Error closing database connection: %s", e)
             finally:
                 self._local.connection = None
@@ -354,10 +641,16 @@ class DatabaseManager:
         Returns:
             True if the table exists.
         """
-        cursor = self.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,),
-        )
+        if self._pg:
+            cursor = self.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_name=?",
+                (table_name,),
+            )
+        else:
+            cursor = self.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            )
         return cursor.fetchone() is not None
 
     def column_exists(self, table_name: str, column_name: str) -> bool:
@@ -370,6 +663,13 @@ class DatabaseManager:
         Returns:
             True if the column exists.
         """
+        if self._pg:
+            cursor = self.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name=? AND column_name=?",
+                (table_name, column_name),
+            )
+            return cursor.fetchone() is not None
         cursor = self.execute(f"PRAGMA table_info({table_name})")
         columns = [row["name"] for row in cursor.fetchall()]
         return column_name in columns
@@ -483,7 +783,7 @@ class DatabaseManager:
     def _ensure_extended_roles(self) -> bool:
         """Widen the users.role CHECK to include extended roles.
 
-        Covers 'project_manager' and 'executive_engineer'. SQLite cannot
+        Covers 'project_manager', 'executive_engineer' and 'hr'. SQLite cannot
         ALTER a CHECK constraint, so an existing users table is rebuilt
         (rename → create → copy → drop). Idempotent: no-op when the
         CHECK already allows all extended roles.
@@ -495,8 +795,10 @@ class DatabaseManager:
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
         ).fetchone()
         ddl = row["sql"] or "" if row else ""
-        if row is None or ("project_manager" in ddl and "executive_engineer" in ddl):
+        if row is None or ("hr" in ddl and "project_manager" in ddl and "executive_engineer" in ddl):
             return False
+        if self._pg:
+            return False  # Postgres schema already includes hr
         try:
             conn = self._get_connection()
             conn.execute("PRAGMA foreign_keys=OFF")
@@ -506,7 +808,7 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     chat_id TEXT NOT NULL UNIQUE,
                     role TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'normal_user', 'viewer', 'pending', 'rejected')),
+                        CHECK (role IN ('superadmin', 'project_manager', 'executive_engineer', 'admin', 'hr', 'normal_user', 'viewer', 'pending', 'rejected')),
                     username TEXT,
                     first_name TEXT,
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),

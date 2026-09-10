@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS recent_contractors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contractor_name TEXT NOT NULL,
     telegram_user TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
     last_used TEXT NOT NULL,
     use_count INTEGER NOT NULL DEFAULT 1,
     UNIQUE(contractor_name, telegram_user)

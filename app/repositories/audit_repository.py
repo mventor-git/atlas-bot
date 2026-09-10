@@ -35,14 +35,12 @@ class AuditRepository:
         'locked' and 'unlocked' actions (G1 fix).
         """
         try:
-            cursor = self._db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_activity_log'"
-            )
-            if cursor.fetchone() is None:
+            if self._db.table_exists("user_activity_log") is False:
                 # Create table — no CHECK constraint (validated in app layer)
                 self._db.execute("""CREATE TABLE IF NOT EXISTS user_activity_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_user TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
                     user_role TEXT NOT NULL,
                     action TEXT NOT NULL,
                     report_date TEXT,
@@ -80,6 +78,7 @@ class AuditRepository:
                 self._db.execute("""CREATE TABLE user_activity_log_v2 (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_user TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
                     user_role TEXT NOT NULL,
                     action TEXT NOT NULL,
                     report_date TEXT,
@@ -91,9 +90,18 @@ class AuditRepository:
                     reverted_entry_id INTEGER,
                     timestamp TEXT NOT NULL
                 )""")
-                self._db.execute("INSERT INTO user_activity_log_v2 SELECT * FROM user_activity_log")
+                self._db.execute(
+                    """INSERT INTO user_activity_log_v2
+                    (id, telegram_user, user_role, action, report_date,
+                     report_status, contractor_name, workers, zone, details,
+                     reverted_entry_id, timestamp)
+                    SELECT id, telegram_user, user_role, action, report_date,
+                     report_status, contractor_name, workers, zone, details,
+                     reverted_entry_id, timestamp FROM user_activity_log"""
+                )
                 self._db.execute("DROP TABLE user_activity_log")
                 self._db.execute("ALTER TABLE user_activity_log_v2 RENAME TO user_activity_log")
+                self._db.ensure_site_columns()
                 self._db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON user_activity_log(telegram_user)")
                 self._db.execute("CREATE INDEX IF NOT EXISTS idx_activity_action ON user_activity_log(action)")
                 self._db.execute("CREATE INDEX IF NOT EXISTS idx_activity_date ON user_activity_log(report_date)")

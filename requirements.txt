@@ -17,8 +17,8 @@ python-dotenv>=1.0,<2.0
 # Data analysis (optional - for reading tables)
 pandas>=2.0,<3.0
 
-# Postgres (migration target, multi-site isolation)
-# psycopg2-binary>=2.9,<3.0  # uncomment when migration ticket lands
+# Postgres (multi-site backend; SQLite is the local default)
+psycopg2-binary>=2.9,<3.0
 
 # Atlas opencode-serve agent (dep TBD, do not add yet)
 # opencode  # version TBD

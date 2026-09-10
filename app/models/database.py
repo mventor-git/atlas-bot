@@ -157,6 +157,9 @@ class Report:
     source_date: Optional[str] = None
     """Original date if this report was copied from another (NEW v2.0)."""
 
+    site_id: Optional[str] = None
+    """Tenant site identifier (multi-site isolation; env SITE_ID when unset)."""
+
     id: Optional[int] = None
     """Database ID (set after persistence)."""
 
@@ -360,6 +363,9 @@ class EventLogEntry:
 
     new_value: Optional[str] = None
     """New state (JSON or string)."""
+
+    site_id: Optional[str] = None
+    """Tenant site identifier (multi-site isolation; env SITE_ID when unset)."""
 
     id: Optional[int] = None
     """Database ID (set after persistence)."""

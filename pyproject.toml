@@ -29,6 +29,7 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "python-dotenv>=1.0,<2.0",
     "pandas>=2.0,<3.0",
+    "psycopg2-binary>=2.9,<3.0",
     # Document engine above (odfpy fill + headless soffice PDF).
     # Atlas opencode-serve agent dep TBD - do not add yet.
 ]
@@ -40,18 +41,15 @@ dev = [
     "pytest-mock>=3.0,<4.0",
     "pytest-asyncio>=0.23,<1.0",
 ]
-postgres = [
-    "psycopg2-binary>=2.9,<3.0",
-]
 
 [project.scripts]
 atlas-bot = "main:main"
 contractor-bot = "main:main"  # legacy alias
 
 [project.urls]
-Homepage = "https://github.com/mventor-git/contractor-bot"
-Documentation = "https://github.com/mventor-git/contractor-bot#readme"
-Repository = "https://github.com/mventor-git/contractor-bot"
+Homepage = "https://github.com/mventor-git/atlas-bot"
+Documentation = "https://github.com/mventor-git/atlas-bot#readme"
+Repository = "https://github.com/mventor-git/atlas-bot"
 
 [tool.setuptools.packages.find]
 where = ["."]
