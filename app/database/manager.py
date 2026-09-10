@@ -318,9 +318,10 @@ CREATE TABLE IF NOT EXISTS contractors (
     name TEXT NOT NULL,
     type TEXT,
     added_by TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (now()),
-    UNIQUE(LOWER(name))
+    created_at TEXT NOT NULL DEFAULT (now())
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contractors_name_unique ON contractors(LOWER(name));
 
 CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
 
@@ -485,10 +486,11 @@ class DatabaseManager:
     def _exec_statements(self, sql: str) -> None:
         """Execute multi-statement SQL (statement splitter for Postgres)."""
         conn = self._get_connection()
+        cursor = conn.cursor()
         for statement in sql.split(";"):
             stmt = statement.strip()
             if stmt:
-                conn.execute(driver.translate(stmt, self._pg))
+                cursor.execute(driver.translate(stmt, self._pg))
         conn.commit()
 
     def ensure_site_columns(self) -> None:
@@ -606,7 +608,11 @@ class DatabaseManager:
             returning = driver.needs_returning(sql, self._pg)
             if returning:
                 sql = sql + " RETURNING id"
-            cursor = conn.execute(sql, params)
+            if self._pg:
+                cursor = conn.cursor()
+                cursor.execute(sql, params)
+            else:
+                cursor = conn.execute(sql, params)
             if returning:
                 return driver.PgCursor(cursor)
             return cursor
@@ -628,7 +634,12 @@ class DatabaseManager:
         """
         try:
             conn = self._get_connection()
-            return conn.executemany(driver.translate(sql, self._pg), params_list)
+            sql = driver.translate(sql, self._pg)
+            if self._pg:
+                cursor = conn.cursor()
+                cursor.executemany(sql, params_list)
+                return cursor
+            return conn.executemany(sql, params_list)
         except _DB_ERRORS as e:
             raise DatabaseError(
                 f"Database executemany error: {e}", original_exception=e
