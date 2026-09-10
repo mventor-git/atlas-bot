@@ -161,6 +161,34 @@ CREATE TABLE IF NOT EXISTS contractors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
+
+-- HR requests (advance + transport allowance chain)
+CREATE TABLE IF NOT EXISTS hr_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requester_chat_id TEXT NOT NULL,
+    requester_name TEXT NOT NULL,
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport')),
+    amount REAL NOT NULL,
+    reason TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    trip_date TEXT,
+    report_ref TEXT,
+    receipt_path TEXT,
+    deduction_month TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
+    assigned_to TEXT,
+    delegated INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    signatures TEXT NOT NULL DEFAULT '[]',
+    pdf_path TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
+CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
+CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -291,6 +319,33 @@ CREATE TABLE IF NOT EXISTS contractors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
+
+CREATE TABLE IF NOT EXISTS hr_requests (
+    id SERIAL PRIMARY KEY,
+    requester_chat_id TEXT NOT NULL,
+    requester_name TEXT NOT NULL,
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport')),
+    amount REAL NOT NULL,
+    reason TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    trip_date TEXT,
+    report_ref TEXT,
+    receipt_path TEXT,
+    deduction_month TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
+    assigned_to TEXT,
+    delegated INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    signatures TEXT NOT NULL DEFAULT '[]',
+    pdf_path TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
+CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
+CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
 """
 
 
