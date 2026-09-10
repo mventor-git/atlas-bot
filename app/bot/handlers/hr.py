@@ -29,11 +29,6 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_ALLOWED_REQUEST_ROLES = (
-    "superadmin", "project_manager", "executive_engineer", "admin",
-    "hr", "normal_user", "viewer",
-)
-
 
 # --- helpers ---
 
@@ -121,9 +116,9 @@ async def transport_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def _start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> None:
-    role = _role(update, context)
+    chat_id, _ = _me(update)
     send = update.effective_message.reply_text
-    if role not in _ALLOWED_REQUEST_ROLES:
+    if not _auth(context).has_capability(chat_id, "submit_hr_request"):
         await send("Your account is not approved yet.")
         return
     context.user_data["hr_flow"] = {"type": kind}
@@ -383,7 +378,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if action == "hr_confirm":
-        if not _auth(context).can_confirm_pm(chat_id):
+        if not _auth(context).has_capability(chat_id, "confirm_hr_request"):
             await query.edit_message_text("PM confirmation needs a PM account.")
             return
         try:
@@ -395,14 +390,14 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _notify(context, req.requester_chat_id,
                       f"Your HR request #{req.id} was confirmed by PM. Sent to HR.")
     elif action == "hr_delegate":
-        if not _auth(context).can_confirm_pm(chat_id):
+        if not _auth(context).has_capability(chat_id, "delegate_hr_request"):
             await query.edit_message_text("Delegation needs a PM account.")
             return
         context.user_data["hr_delegate_id"] = req_id
         context.user_data["state"] = "awaiting_delegate_target"
         await query.edit_message_text("Send the HQ HR chat ID to delegate to.")
     elif action == "hr_approve":
-        if not _auth(context).can_approve_hr(chat_id):
+        if not _auth(context).has_capability(chat_id, "decide_hr_request"):
             await query.edit_message_text("Approval needs an HR account.")
             return
         req = service._repo.get_by_id(req_id)
@@ -427,14 +422,14 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await _notify(context, decided.requester_chat_id,
                           f"Your HR request #{decided.id} was approved.")
     elif action == "hr_reject":
-        if not _auth(context).can_approve_hr(chat_id):
+        if not _auth(context).has_capability(chat_id, "decide_hr_request"):
             await query.edit_message_text("Rejection needs an HR account.")
             return
         context.user_data["hr_reject_id"] = req_id
         context.user_data["state"] = "awaiting_reject_note"
         await query.edit_message_text("Send the rejection note.")
     elif action == "hr_month":
-        if not _auth(context).can_approve_hr(chat_id):
+        if not _auth(context).has_capability(chat_id, "decide_hr_request"):
             await query.edit_message_text("Approval needs an HR account.")
             return
         month = parts[1]

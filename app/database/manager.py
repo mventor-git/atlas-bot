@@ -191,6 +191,21 @@ CREATE TABLE IF NOT EXISTS hr_requests (
 CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
+
+-- Site memberships (008 tenancy: user -> sites + capability grants)
+CREATE TABLE IF NOT EXISTS user_site_memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'suspended')),
+    created_at TEXT NOT NULL,
+    UNIQUE(chat_id, site_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memberships_chat ON user_site_memberships(chat_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_site ON user_site_memberships(site_id);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -351,6 +366,20 @@ CREATE TABLE IF NOT EXISTS hr_requests (
 CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
+
+CREATE TABLE IF NOT EXISTS user_site_memberships (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'suspended')),
+    created_at TEXT NOT NULL,
+    UNIQUE(chat_id, site_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memberships_chat ON user_site_memberships(chat_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_site ON user_site_memberships(site_id);
 """
 
 

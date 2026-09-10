@@ -41,13 +41,15 @@ def make_update(user_id=111, text="", callback_data=None):
     return update
 
 
-def make_auth(role="normal_user", confirm=True, approve=True):
+def make_auth(role="normal_user"):
+    from app.auth import capabilities as caps
     from app.services.authorization_service import AuthorizationService
 
     auth = MagicMock(spec=AuthorizationService)
     auth.get_role.return_value = role
-    auth.can_confirm_pm.return_value = confirm
-    auth.can_approve_hr.return_value = approve
+    auth.has_capability.side_effect = (
+        lambda chat_id, capability, site_id=None: capability in caps.for_role(role)
+    )
     return auth
 
 
@@ -135,7 +137,7 @@ class TestApprovalCallbacks:
 
     async def test_non_pm_cannot_confirm(self, service, user_data):
         req = await self._filed_advance(service, user_data)
-        ctx = make_context(make_auth("normal_user", confirm=False), service, {})
+        ctx = make_context(make_auth("normal_user"), service, {})
         upd = make_update(333, callback_data=f"hr_confirm:{req.id}")
         await hr_handlers.handle_hr_callback(upd, ctx)
         assert service._repo.get_by_id(req.id).status == HRRequestStatus.PENDING
@@ -188,7 +190,7 @@ class TestApprovalCallbacks:
         pm = make_context(make_auth("project_manager"), service, {})
         await hr_handlers.handle_hr_callback(
             make_update(222, callback_data=f"hr_confirm:{req.id}"), pm)
-        ctx = make_context(make_auth("normal_user", approve=False), service, {})
+        ctx = make_context(make_auth("normal_user"), service, {})
         upd = make_update(111, callback_data=f"hr_approve:{req.id}")
         await hr_handlers.handle_hr_callback(upd, ctx)
         assert service._repo.get_by_id(req.id).status == HRRequestStatus.PM_CONFIRMED

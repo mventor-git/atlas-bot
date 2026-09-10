@@ -430,6 +430,33 @@ class User:
 
 
 @dataclass
+class SiteMembership:
+    """A user's membership in one site with capability grants (008 tenancy).
+
+    Authority = capabilities + scope. Roles stay HR labels. Explicit
+    per-site grants win over role defaults; status gates everything.
+    """
+
+    chat_id: str
+    """Telegram chat ID."""
+
+    site_id: str
+    """Site identifier."""
+
+    capabilities: list = field(default_factory=list)
+    """Explicitly granted capability names (JSON in DB)."""
+
+    status: str = "active"
+    """'active' or 'suspended'."""
+
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    """ISO datetime when the membership was granted."""
+
+    id: Optional[int] = None
+    """Database ID (set after persistence)."""
+
+
+@dataclass
 class StatsCache:
     """Pre-computed statistics for fast dashboard display. (NEW v2.0)
 
