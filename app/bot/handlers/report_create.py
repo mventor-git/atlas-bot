@@ -581,6 +581,27 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Forward to contractor report handler
         from app.bot.handlers.start import handle_contractor_report_name
         await handle_contractor_report_name(update, context)
+    elif state in ("awaiting_hr_amount", "awaiting_hr_reason",
+                   "awaiting_hr_trip_date", "awaiting_hr_report_ref",
+                   "awaiting_reject_note", "awaiting_delegate_target",
+                   "awaiting_deduction_month"):
+        # Forward to HR handlers (imported here to avoid circular dependency)
+        from app.bot.handlers import hr as hr_handlers
+
+        if state == "awaiting_hr_amount":
+            await hr_handlers.handle_hr_amount(update, context)
+        elif state == "awaiting_hr_reason":
+            await hr_handlers.handle_hr_reason(update, context)
+        elif state == "awaiting_hr_trip_date":
+            await hr_handlers.handle_hr_trip_date(update, context)
+        elif state == "awaiting_hr_report_ref":
+            await hr_handlers.handle_hr_report_ref(update, context)
+        elif state == "awaiting_reject_note":
+            await hr_handlers.handle_reject_note(update, context)
+        elif state == "awaiting_delegate_target":
+            await hr_handlers.handle_delegate_target(update, context)
+        elif state == "awaiting_deduction_month":
+            await hr_handlers.handle_deduction_month(update, context)
     elif state in ("awaiting_finalize_confirmation", "awaiting_lock_confirmation"):
         await update.message.reply_text(
             "Please use the confirmation buttons above, or type /cancel to go back.",

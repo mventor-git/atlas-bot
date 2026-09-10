@@ -13,6 +13,7 @@ def _get_role_level(role: str) -> int:
     levels = {
         "superadmin": 100,
         "project_manager": 100,
+        "hr": 100,
         "executive_engineer": 80,
         "admin": 80,
         "normal_user": 40,
@@ -21,6 +22,43 @@ def _get_role_level(role: str) -> int:
         "rejected": 0,
     }
     return levels.get(role, 0)
+
+
+def hr_menu_keyboard(role: str = "pending") -> InlineKeyboardMarkup:
+    """HR menu: request buttons for everyone, queue for PM/HR/superadmin."""
+    level = _get_role_level(role)
+    keyboard = [
+        [
+            InlineKeyboardButton("Request Advance", callback_data="hr_new_advance"),
+            InlineKeyboardButton("Request Transport", callback_data="hr_new_transport"),
+        ],
+        [InlineKeyboardButton("My Requests", callback_data="hr_my")],
+    ]
+    if level >= 100 and role in ("superadmin", "project_manager", "hr"):
+        keyboard.append([InlineKeyboardButton("Approval Queue", callback_data="hr_pending")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def hr_month_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    """Next 6 deduction months as buttons (advance approval)."""
+    from datetime import date
+
+    today = date.today()
+    buttons = []
+    row = []
+    year, month = today.year, today.month
+    for _ in range(6):
+        key = f"{year:04d}-{month:02d}"
+        row.append(InlineKeyboardButton(key, callback_data=f"hr_month:{key}:{request_id}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(buttons)
 
 
 def main_menu_keyboard(report_status: str, role: str = "pending", has_reports: bool = False, is_business_hours: bool = True) -> InlineKeyboardMarkup:
