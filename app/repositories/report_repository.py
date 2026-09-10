@@ -54,7 +54,7 @@ class ReportRepository(BaseRepository[Report]):
 
     # --- BaseRepository implementation ---
 
-    def get_by_id(self, report_id: int) -> Optional[Report]:
+    def get_by_id(self, report_id: int, site_id: str | None = None) -> Optional[Report]:
         """Get a report by its ID, including items.
 
         Args:
@@ -64,7 +64,7 @@ class ReportRepository(BaseRepository[Report]):
             Report with items if found, None otherwise.
         """
         row = self._db.execute(
-            "SELECT * FROM reports WHERE id = ?", (report_id,)
+            "SELECT * FROM reports WHERE id = ? AND site_id = ?", (report_id, site_id or driver.site_id())
         ).fetchone()
 
         if row is None:
@@ -74,14 +74,15 @@ class ReportRepository(BaseRepository[Report]):
         report.items = self._get_items_for_report(report_id)
         return report
 
-    def get_all(self) -> list[Report]:
-        """Get all reports, ordered by date descending.
+    def get_all(self, site_id: str | None = None) -> list[Report]:
+        """Get all reports in this site, ordered by date descending.
 
         Returns:
             List of all reports (without items for performance).
         """
         rows = self._db.execute(
-            "SELECT * FROM reports ORDER BY date DESC"
+            "SELECT * FROM reports WHERE site_id = ? ORDER BY date DESC",
+            (site_id or driver.site_id(),),
         ).fetchall()
         return [self._row_to_report(row) for row in rows]
 
@@ -214,14 +215,15 @@ class ReportRepository(BaseRepository[Report]):
 
         # Auto-set updated_at on every modification
         now = datetime.now().isoformat()
+        site = report.site_id or driver.site_id()
 
-        self._db.execute(
+        cursor = self._db.execute(
             """UPDATE reports
                SET date=?, day=?, status=?, pdf_path=?, excel_path=?,
                    telegram_user=?, updated_at=?,
                    finalized_at=?, locked_at=?, locked_by=?,
                    source_date=?, preview_pdf_path=?
-               WHERE id=?""",
+               WHERE id=? AND site_id=?""",
             (
                 report.date,
                 report.day,
@@ -236,8 +238,13 @@ class ReportRepository(BaseRepository[Report]):
                 report.source_date,
                 report.preview_pdf_path,
                 report.id,
+                site,
             ),
         )
+        if cursor.rowcount == 0:
+            raise DatabaseError(
+                f"Report {report.id} not found in this site - update refused."
+            )
 
         # Replace items: delete old, insert new
         self._db.execute("DELETE FROM report_items WHERE report_id=?", (report.id,))
@@ -270,8 +277,8 @@ class ReportRepository(BaseRepository[Report]):
 
         return report
 
-    def delete(self, report_id: int) -> bool:
-        """Delete a report and its items by ID.
+    def delete(self, report_id: int, site_id: str | None = None) -> bool:
+        """Delete a report and its items by ID within this site.
 
         Args:
             report_id: The ID of the report to delete.
@@ -282,10 +289,11 @@ class ReportRepository(BaseRepository[Report]):
         # Capture report data for event logging (before deletion)
         report_to_delete = None
         if self._event_log is not None:
-            report_to_delete = self.get_by_id(report_id)
+            report_to_delete = self.get_by_id(report_id, site_id=site_id)
 
         # Items are deleted via CASCADE
-        cursor = self._db.execute("DELETE FROM reports WHERE id=?", (report_id,))
+        site = site_id or driver.site_id()
+        cursor = self._db.execute("DELETE FROM reports WHERE id=? AND site_id=?", (report_id, site))
         self._db.commit()
         deleted = cursor.rowcount > 0
         if deleted:
@@ -311,13 +319,16 @@ class ReportRepository(BaseRepository[Report]):
 
         return deleted
 
-    def count(self) -> int:
-        """Count total reports.
+    def count(self, site_id: str | None = None) -> int:
+        """Count total reports in this site.
 
         Returns:
             Total number of reports.
         """
-        row = self._db.execute("SELECT COUNT(*) as cnt FROM reports").fetchone()
+        row = self._db.execute(
+            "SELECT COUNT(*) as cnt FROM reports WHERE site_id = ?",
+            (site_id or driver.site_id(),),
+        ).fetchone()
         return row["cnt"] if row else 0
 
     # --- Additional query methods ---
@@ -352,7 +363,7 @@ class ReportRepository(BaseRepository[Report]):
         ).fetchone()
         return row is not None
 
-    def get_reports_in_range(self, start_date: str, end_date: str) -> list[Report]:
+    def get_reports_in_range(self, start_date: str, end_date: str, site_id: str | None = None) -> list[Report]:
         """Get all reports within a date range (inclusive).
 
         Args:
@@ -363,19 +374,20 @@ class ReportRepository(BaseRepository[Report]):
             List of reports (without items).
         """
         rows = self._db.execute(
-            "SELECT * FROM reports WHERE date >= ? AND date <= ? ORDER BY date ASC",
-            (start_date, end_date),
+            "SELECT * FROM reports WHERE date >= ? AND date <= ? AND site_id = ? ORDER BY date ASC",
+            (start_date, end_date, site_id or driver.site_id()),
         ).fetchall()
         return [self._row_to_report(row) for row in rows]
 
-    def get_no_report_dates(self) -> list[str]:
-        """Get all dates where status is 'no_report'.
+    def get_no_report_dates(self, site_id: str | None = None) -> list[str]:
+        """Get all dates where status is 'no_report' within this site.
 
         Returns:
             List of date strings.
         """
         rows = self._db.execute(
-            "SELECT date FROM reports WHERE status = 'no_report' ORDER BY date DESC"
+            "SELECT date FROM reports WHERE status = 'no_report' AND site_id = ? ORDER BY date DESC",
+            (site_id or driver.site_id(),),
         ).fetchall()
         return [row["date"] for row in rows]
 

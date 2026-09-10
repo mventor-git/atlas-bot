@@ -51,6 +51,9 @@ class UserActivityLog:
     reverted_entry_id: Optional[int] = None
     """ID of the original activity log entry that was reverted."""
 
+    site_id: Optional[str] = None
+    """Tenant site identifier (multi-site isolation; env SITE_ID when unset)."""
+
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     """ISO datetime when the action occurred."""
 

@@ -11,6 +11,7 @@ mventor-ticket-015: Statistics Engine
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.repositories.stats_cache_repository import StatsCacheRepository
 from app.utils.logger import get_logger
@@ -137,7 +138,7 @@ class StatisticsEngine:
         self._db = db_manager
         self._cache = stats_cache_repo
 
-    def get_period_stats(self, period: str, period_key: str) -> PeriodStats:
+    def get_period_stats(self, period: str, period_key: str, site_id: str | None = None) -> PeriodStats:
         """Get statistics for a specific period, with caching.
 
         Checks cache first. On miss, computes from SQL, caches, and returns.
@@ -156,25 +157,26 @@ class StatisticsEngine:
             raise ValueError(
                 f"Invalid period '{period}'. Must be one of {self.VALID_PERIODS}"
             )
+        site = site_id or driver.site_id()
 
         # Try cache first
-        cached = self._get_cached(period, period_key)
+        cached = self._get_cached(period, period_key, site)
         if cached is not None:
             logger.debug("Cache hit for %s/%s", period, period_key)
             return cached
 
         # Compute fresh
-        stats = self._compute_stats(period, period_key)
+        stats = self._compute_stats(period, period_key, site)
 
         # Calculate trend
-        stats.trend = self._calculate_trend(period, period_key)
+        stats.trend = self._calculate_trend(period, period_key, site)
 
         # Cache the result
-        self._set_cached(period, period_key, stats)
+        self._set_cached(period, period_key, site, stats)
 
         return stats
 
-    def get_daily_stats(self, date: str) -> PeriodStats:
+    def get_daily_stats(self, date: str, site_id: str | None = None) -> PeriodStats:
         """Get statistics for a specific date.
 
         Args:
@@ -183,9 +185,9 @@ class StatisticsEngine:
         Returns:
             PeriodStats for the given date.
         """
-        return self.get_period_stats("daily", date)
+        return self.get_period_stats("daily", date, site_id)
 
-    def get_monthly_stats(self, year: int, month: int) -> PeriodStats:
+    def get_monthly_stats(self, year: int, month: int, site_id: str | None = None) -> PeriodStats:
         """Get statistics for a specific month.
 
         Args:
@@ -201,9 +203,9 @@ class StatisticsEngine:
         if not 1 <= month <= 12:
             raise ValueError(f"Month must be 1-12, got {month}")
         period_key = f"{year:04d}-{month:02d}"
-        return self.get_period_stats("monthly", period_key)
+        return self.get_period_stats("monthly", period_key, site_id)
 
-    def get_yearly_stats(self, year: int) -> PeriodStats:
+    def get_yearly_stats(self, year: int, site_id: str | None = None) -> PeriodStats:
         """Get statistics for a specific year.
 
         Args:
@@ -213,9 +215,9 @@ class StatisticsEngine:
             PeriodStats for the given year.
         """
         period_key = f"{year:04d}"
-        return self.get_period_stats("yearly", period_key)
+        return self.get_period_stats("yearly", period_key, site_id)
 
-    def calculate_trend(self, period: str, period_key: str) -> Optional[str]:
+    def calculate_trend(self, period: str, period_key: str, site_id: str | None = None) -> Optional[str]:
         """Calculate the worker trend direction for a period.
 
         Compares the current period's total workers with the previous
@@ -229,21 +231,22 @@ class StatisticsEngine:
             'up' if workers increased, 'down' if decreased,
             'stable' if unchanged, None if comparison not possible.
         """
-        return self._calculate_trend(period, period_key)
+        return self._calculate_trend(period, period_key, site_id or driver.site_id())
 
-    def invalidate_cache(self, period: str, period_key: str) -> bool:
+    def invalidate_cache(self, period: str, period_key: str, site_id: str | None = None) -> bool:
         """Remove a specific cache entry.
 
         Args:
             period: Period type.
             period_key: Period identifier.
+            site_id: Tenant site (defaults to this bot's SITE_ID).
 
         Returns:
             True if removed, False if not found or no cache.
         """
         if self._cache is None:
             return False
-        return self._cache.invalidate(period, period_key)
+        return self._cache.invalidate(period, self._cache_key(period_key, site_id))
 
     def invalidate_all_cache(self) -> int:
         """Remove all cached statistics.
@@ -257,7 +260,12 @@ class StatisticsEngine:
 
     # --- Private: Cache helpers ---
 
-    def _get_cached(self, period: str, period_key: str) -> Optional[PeriodStats]:
+    @staticmethod
+    def _cache_key(period_key: str, site_id: str | None) -> str:
+        """Namespace cache keys per site (shared cache table)."""
+        return f"{site_id or driver.site_id()}\x00{period_key}"
+
+    def _get_cached(self, period: str, period_key: str, site: str) -> Optional[PeriodStats]:
         """Try to retrieve stats from cache.
 
         Args:
@@ -270,7 +278,7 @@ class StatisticsEngine:
         if self._cache is None:
             return None
 
-        data = self._cache.get_stats(period, period_key)
+        data = self._cache.get_stats(period, self._cache_key(period_key, site))
         if data is None:
             return None
 
@@ -280,7 +288,7 @@ class StatisticsEngine:
             logger.warning("Invalid cached data for %s/%s: %s", period, period_key, e)
             return None
 
-    def _set_cached(self, period: str, period_key: str, stats: PeriodStats) -> None:
+    def _set_cached(self, period: str, period_key: str, site: str, stats: PeriodStats) -> None:
         """Store stats in cache.
 
         Args:
@@ -292,13 +300,13 @@ class StatisticsEngine:
             return
 
         try:
-            self._cache.set_stats(period, period_key, stats.to_dict())
+            self._cache.set_stats(period, self._cache_key(period_key, site), stats.to_dict())
         except Exception as e:
             logger.warning("Failed to cache stats for %s/%s: %s", period, period_key, e)
 
     # --- Private: Computation ---
 
-    def _compute_stats(self, period: str, period_key: str) -> PeriodStats:
+    def _compute_stats(self, period: str, period_key: str, site: str) -> PeriodStats:
         """Compute statistics from SQL queries.
 
         Args:
@@ -308,7 +316,7 @@ class StatisticsEngine:
         Returns:
             PeriodStats with computed values (trend not set).
         """
-        date_filter = self._build_date_filter(period, period_key)
+        date_filter = self._build_date_filter(period, period_key, site)
 
         # Get report count and basic aggregates
         totals = self._compute_totals(date_filter)
@@ -334,7 +342,7 @@ class StatisticsEngine:
             top_zone=top_zone,
         )
 
-    def _build_date_filter(self, period: str, period_key: str) -> tuple[str, tuple]:
+    def _build_date_filter(self, period: str, period_key: str, site: str) -> tuple[str, tuple]:
         """Build a SQL WHERE clause fragment for date filtering.
 
         Args:
@@ -345,13 +353,13 @@ class StatisticsEngine:
             Tuple of (sql_fragment, params).
         """
         if period == "daily":
-            return "r.date = ?", (period_key,)
+            return "r.site_id = ? AND r.date = ?", (site, period_key)
         elif period == "monthly":
             # period_key is 'YYYY-MM'
-            return "r.date LIKE ?", (period_key + "%",)
+            return "r.site_id = ? AND r.date LIKE ?", (site, period_key + "%")
         elif period == "yearly":
             # period_key is 'YYYY'
-            return "r.date LIKE ?", (period_key + "%",)
+            return "r.site_id = ? AND r.date LIKE ?", (site, period_key + "%")
         else:
             return "1=0", ()
 
@@ -470,7 +478,7 @@ class StatisticsEngine:
             return ("", 0)
         return (row["zone"], row["appearances"])
 
-    def _calculate_trend(self, period: str, period_key: str) -> Optional[str]:
+    def _calculate_trend(self, period: str, period_key: str, site: str) -> Optional[str]:
         """Calculate the worker trend by comparing to previous period.
 
         Args:
@@ -484,8 +492,8 @@ class StatisticsEngine:
         if prev_key is None:
             return None
 
-        current_workers = self._get_total_workers(period, period_key)
-        previous_workers = self._get_total_workers(period, prev_key)
+        current_workers = self._get_total_workers(period, period_key, site)
+        previous_workers = self._get_total_workers(period, prev_key, site)
 
         # If no data for either period, no trend
         if current_workers == 0 and previous_workers == 0:
@@ -502,7 +510,7 @@ class StatisticsEngine:
         else:
             return "stable"
 
-    def _get_total_workers(self, period: str, period_key: str) -> int:
+    def _get_total_workers(self, period: str, period_key: str, site: str) -> int:
         """Get total workers for a period (no caching, direct SQL).
 
         Args:
@@ -512,7 +520,7 @@ class StatisticsEngine:
         Returns:
             Total workers count.
         """
-        date_filter = self._build_date_filter(period, period_key)
+        date_filter = self._build_date_filter(period, period_key, site)
         sql_fragment, params = date_filter
 
         row = self._db.execute(

@@ -1,5 +1,6 @@
 ﻿"""Search repository for Universal Search. (mventor-ticket-012)"""
 
+from app.database import driver
 from app.database.manager import DatabaseManager
 from app.models.database import ReportStatus
 from app.models.search import SearchHit, SearchQuery, SearchResult
@@ -157,8 +158,8 @@ class SearchRepository:
 
     def _build_where(self, query: SearchQuery) -> tuple[str, list[object]]:
         """Build WHERE clause and parameters for the query."""
-        conditions: list[str] = []
-        params: list[object] = []
+        conditions: list[str] = ["r.site_id = ?"]
+        params: list[object] = [query.site_id or driver.site_id()]
         text = query.normalized_text.lower()
 
         if text:
