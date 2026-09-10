@@ -295,7 +295,7 @@ class ValidationService:
         if current is None:
             warnings.append(ValidationWarning(
                 field="status",
-                message="Report has no status â€” cannot perform transition.",
+                message="Report has no status — cannot perform transition.",
                 severity="error",
             ))
             return warnings
@@ -303,7 +303,7 @@ class ValidationService:
         allowed = self.VALID_TRANSITIONS.get(current, set())
 
         if new not in allowed:
-            allowed_str = " â†’ ".join(s.value for s in allowed) if allowed else "none"
+            allowed_str = " → ".join(s.value for s in allowed) if allowed else "none"
             warnings.append(ValidationWarning(
                 field="status",
                 message=(
@@ -314,7 +314,7 @@ class ValidationService:
             ))
             return warnings
 
-        # Locked â†’ Draft requires admin
+        # Locked → Draft requires admin
         if current == ReportStatus.LOCKED and new == ReportStatus.DRAFT and not admin:
             warnings.append(ValidationWarning(
                 field="status",

@@ -60,8 +60,8 @@ class TestDashboardData:
 
     def test_creation(self):
         data = DashboardData(
-            date="Ù¡Ù¥ / Ù Ù¨ / Ù¢Ù Ù¢Ù¦",
-            day="Ø§Ù„Ø³Ø¨Øª",
+            date="١٥ / ٠٨ / ٢٠٢٦",
+            day="السبت",
             time="10:30",
             report_status="draft",
             contractor_count=3,
@@ -69,8 +69,8 @@ class TestDashboardData:
             time_remaining="3h 30m",
             buttons=["Open Draft", "Search"],
         )
-        assert data.date == "Ù¡Ù¥ / Ù Ù¨ / Ù¢Ù Ù¢Ù¦"
-        assert data.day == "Ø§Ù„Ø³Ø¨Øª"
+        assert data.date == "١٥ / ٠٨ / ٢٠٢٦"
+        assert data.day == "السبت"
         assert data.time == "10:30"
         assert data.report_status == "draft"
         assert data.contractor_count == 3
@@ -156,7 +156,7 @@ class TestDailyDashboardService:
     ):
         """Should show 'draft' when a draft report exists."""
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -168,7 +168,7 @@ class TestDailyDashboardService:
     ):
         """Should show 'final' when a finalized report exists."""
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.FINAL, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -180,7 +180,7 @@ class TestDailyDashboardService:
     ):
         """Should show 'locked' when a locked report exists."""
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.LOCKED, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -192,7 +192,7 @@ class TestDailyDashboardService:
     ):
         """Should show 'no_report' when no_report status is set."""
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.NO_REPORT, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -208,7 +208,7 @@ class TestDailyDashboardService:
     ):
         """Should count contractors in today's report."""
         report = Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         report.add_item(ReportItem(contractor="C1", workers=5))
@@ -227,7 +227,7 @@ class TestDailyDashboardService:
     ):
         """Should sum all workers in today's report."""
         report = Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         report.add_item(ReportItem(contractor="C1", workers=10))
@@ -253,7 +253,7 @@ class TestDailyDashboardService:
     ):
         """Should show zero counts when no_report status."""
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.NO_REPORT, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -266,7 +266,7 @@ class TestDailyDashboardService:
     ):
         """Should handle items with workers=None without error."""
         report = Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         report.add_item(ReportItem(contractor="C1", workers=None))
@@ -339,7 +339,7 @@ class TestDailyDashboardService:
         self, service: DailyDashboardService, repo: ReportRepository
     ):
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.NO_REPORT, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -350,7 +350,7 @@ class TestDailyDashboardService:
         self, service: DailyDashboardService, repo: ReportRepository
     ):
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -361,7 +361,7 @@ class TestDailyDashboardService:
         self, service: DailyDashboardService, repo: ReportRepository
     ):
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.FINAL, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -372,7 +372,7 @@ class TestDailyDashboardService:
         self, service: DailyDashboardService, repo: ReportRepository
     ):
         repo.add(Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.LOCKED, telegram_user="u1",
         ))
         fixed_now = datetime(2026, 7, 11, 10, 0)
@@ -388,7 +388,7 @@ class TestDailyDashboardService:
     ):
         """Full dashboard for a draft report should have all fields populated."""
         report = Report(
-            date="2026-07-11", day="Ø§Ù„Ø³Ø¨Øª",
+            date="2026-07-11", day="السبت",
             status=ReportStatus.DRAFT, telegram_user="u1",
         )
         report.add_item(ReportItem(contractor="Civil Co", workers=10))
@@ -399,7 +399,7 @@ class TestDailyDashboardService:
         dash = service.get_dashboard(today="2026-07-11", now_time=fixed_now)
 
         assert dash.date == ArabicDateService.get_arabic_date(date(2026, 7, 11))
-        assert dash.day == "Ø§Ù„Ø³Ø¨Øª"
+        assert dash.day == "السبت"
         assert dash.time == "11:30"
         assert dash.report_status == "draft"
         assert dash.contractor_count == 2

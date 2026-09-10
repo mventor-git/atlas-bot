@@ -35,12 +35,14 @@ exports/docs/*
 exports/preview/*
 exports/pdf_database/*
 exports/print_queue/*
+exports/printed/*
 exports/receipts/*
 !exports/pdf/.gitkeep
 !exports/docs/.gitkeep
 !exports/preview/.gitkeep
 !exports/pdf_database/.gitkeep
 !exports/print_queue/.gitkeep
+!exports/printed/.gitkeep
 
 # Database (clean start - no data files in repo)
 database/*.db

@@ -196,6 +196,7 @@ class ReportWorkflowService:
         current_hour: int | None = None,
         current_minute: int | None = None,
         telegram_user: str = "system",
+        today_str: str | None = None,
     ) -> int:
         """Auto-finalize draft reports for today after the configured deadline.
 
@@ -231,7 +232,8 @@ class ReportWorkflowService:
         if current_total < target_total:
             return 0
 
-        today_str = now.strftime("%Y-%m-%d")
+        if today_str is None:
+            today_str = now.strftime("%Y-%m-%d")
         finalized_count = 0
 
         # Use get_by_date() which loads items (get_all() skips items for performance)

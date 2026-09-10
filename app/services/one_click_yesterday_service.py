@@ -2,7 +2,7 @@
 
 Creates today's draft report by copying yesterday's report data.
 Yesterday's report remains unchanged. The returned draft is an
-in-memory object â€” the handler can let the user edit it before
+in-memory object — the handler can let the user edit it before
 persisting via AutoSaveService.
 
 Typical usage:
@@ -10,11 +10,11 @@ Typical usage:
     draft = service.copy_yesterday(
         yesterday_date="2026-07-10",
         today_date="2026-07-11",
-        today_day="Ø§Ù„Ø³Ø¨Øª",
+        today_day="السبت",
         telegram_user="user123",
     )
     if draft is None:
-        # No report for yesterday â€” start fresh
+        # No report for yesterday — start fresh
     else:
         # User edits draft, then auto-save persists it
 """
@@ -62,7 +62,7 @@ class OneClickYesterdayService:
         Args:
             yesterday_date: Yesterday's date string (YYYY-MM-DD).
             today_date: Today's date string (YYYY-MM-DD).
-            today_day: Today's Arabic day name (e.g. 'Ø§Ù„Ø³Ø¨Øª').
+            today_day: Today's Arabic day name (e.g. 'السبت').
             telegram_user: Who is performing this action.
 
         Returns:
@@ -73,13 +73,13 @@ class OneClickYesterdayService:
 
         if yesterday_report is None:
             logger.info(
-                "No yesterday report for %s â€” cannot copy", yesterday_date
+                "No yesterday report for %s — cannot copy", yesterday_date
             )
             return None
 
         if yesterday_report.status == ReportStatus.NO_REPORT:
             logger.info(
-                "Yesterday (%s) is a no-report day â€” cannot copy",
+                "Yesterday (%s) is a no-report day — cannot copy",
                 yesterday_date,
             )
             return None

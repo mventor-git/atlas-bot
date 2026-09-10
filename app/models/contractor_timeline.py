@@ -20,7 +20,7 @@ class TimelineEntry:
     """Report date in YYYY-MM-DD format."""
 
     day: str
-    """Day name in Arabic (e.g., 'Ø§Ù„Ø§Ø«Ù†ÙŠÙ†')."""
+    """Day name in Arabic (e.g., 'الاثنين')."""
 
     workers: Optional[int] = None
     """Number of workers for this contractor on this date."""

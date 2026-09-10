@@ -165,7 +165,7 @@ class TestSmartSuggestionService:
         report_repo: ReportRepository, today: str, yesterday: str
     ):
         """Yesterday's contractors should appear in suggestions."""
-        report = Report(date=yesterday, day="Ø§Ù„Ø®Ù…ÙŠØ³", status=ReportStatus.DRAFT)
+        report = Report(date=yesterday, day="الخميس", status=ReportStatus.DRAFT)
         report.add_item(ReportItem(contractor="HVAC Experts", workers=5))
         report.add_item(ReportItem(contractor="Painters Pro", workers=3))
         report_repo.add(report)
@@ -191,7 +191,7 @@ class TestSmartSuggestionService:
         # Also recent
         recent_repo.record_usage("user1", "Civil Works Company")
         # Also in yesterday's report
-        report = Report(date=yesterday, day="Ø§Ù„Ø®Ù…ÙŠØ³", status=ReportStatus.DRAFT)
+        report = Report(date=yesterday, day="الخميس", status=ReportStatus.DRAFT)
         report.add_item(ReportItem(contractor="Civil Works Company", workers=10))
         report_repo.add(report)
 
@@ -359,7 +359,7 @@ class TestSmartSuggestionService:
         """Yesterday's contractors should be deduplicated if already in favorites."""
         favorites_repo.add_favorite("user1", "HVAC Experts")
 
-        report = Report(date=yesterday, day="Ø§Ù„Ø®Ù…ÙŠØ³", status=ReportStatus.DRAFT)
+        report = Report(date=yesterday, day="الخميس", status=ReportStatus.DRAFT)
         report.add_item(ReportItem(contractor="HVAC Experts", workers=5))
         report.add_item(ReportItem(contractor="Painters Pro", workers=3))
         report_repo.add(report)

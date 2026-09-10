@@ -741,7 +741,7 @@ class DatabaseManager:
         Checks if the database needs migration (v1.0 schema detected)
         and runs the migration to add all v2.0 tables, columns, and indexes.
 
-        The migration is idempotent â€” safe to run multiple times.
+        The migration is idempotent — safe to run multiple times.
 
         Returns:
             True if migration was performed, False if already up-to-date.
@@ -750,10 +750,10 @@ class DatabaseManager:
             DatabaseError: If migration fails.
         """
         if not self._needs_migration():
-            logger.info("Database schema is already v2.0 â€” no migration needed.")
+            logger.info("Database schema is already v2.0 — no migration needed.")
             return False
 
-        logger.info("v1.0 database detected â€” starting migration to v2.0...")
+        logger.info("v1.0 database detected — starting migration to v2.0...")
         self._migrate_v1_to_v2()
         logger.info("Database migration to v2.0 completed successfully.")
         return True
@@ -769,7 +769,7 @@ class DatabaseManager:
         """
         if not self.table_exists("reports"):
             return False  # Fresh database, schema init handles it
-        # Check for v2.0 column â€” if absent, it's a v1.0 database
+        # Check for v2.0 column — if absent, it's a v1.0 database
         return not self.column_exists("reports", "updated_at")
 
     def _migrate_v1_to_v2(self) -> None:
@@ -806,7 +806,7 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE report_items ADD COLUMN contractor_code TEXT")
                 logger.debug("Added column 'report_items.contractor_code'")
 
-            # Step 3: Migrate status values (generated â†’ final)
+            # Step 3: Migrate status values (generated → final)
             # The v1 schema has CHECK (status IN ('generated', 'no_report')),
             # so temporarily ignore CHECK constraints to allow the update.
             conn.execute("PRAGMA ignore_check_constraints = ON")
@@ -830,7 +830,7 @@ class DatabaseManager:
             conn.executescript(SCHEMA_SQL)
 
             conn.commit()
-            logger.info("v1.0 â†’ v2.0 migration complete.")
+            logger.info("v1.0 → v2.0 migration complete.")
 
         except sqlite3.Error as e:
             conn.rollback()

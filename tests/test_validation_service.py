@@ -63,7 +63,7 @@ def make_item(contractor: str = "Civil Co", workers: int = 10,
 
 def make_report(items: list[ReportItem] | None = None,
                 date: str = "2026-07-11",
-                day: str = "Ø§Ù„Ø³Ø¨Øª") -> Report:
+                day: str = "السبت") -> Report:
     report = Report(date=date, day=day)
     if items:
         for item in items:
