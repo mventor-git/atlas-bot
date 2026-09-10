@@ -324,9 +324,25 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
         return
     context.user_data.pop("hr_approve_id", None)
     context.user_data.pop("state", None)
+    await _after_approval(update, context, service, req)
     await update.message.reply_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
     await _notify(context, req.requester_chat_id,
                   f"Your HR request #{req.id} was approved.\nDeduct from: {month}")
+
+
+async def _after_approval(update, context, service, req) -> None:
+    """Render + record + queue the approved PDF (006-D). Never fails the approval."""
+    try:
+        from app.libre.hr_fill import queue_for_print, render_pdf
+
+        config = context.bot_data["app_config"]
+        pdf = render_pdf(req, config)
+        service.record_pdf(req.id, pdf)
+        queue_for_print(pdf)
+        logger.info("HR request #%s rendered + queued: %s", req.id, pdf)
+    except Exception as e:
+        logger.warning("HR PDF render/queue failed for #%s: %s",
+                       getattr(req, "id", "?"), e)
 
 
 # --- callbacks ---
@@ -402,6 +418,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except DatabaseError as e:
                 await query.edit_message_text(f"Could not approve: {e}")
                 return
+            await _after_approval(update, context, service, decided)
             await query.edit_message_text(f"Approved:\n{_render(decided)}", parse_mode="Markdown")
             await _notify(context, decided.requester_chat_id,
                           f"Your HR request #{decided.id} was approved.")
@@ -424,6 +441,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         context.user_data.pop("hr_approve_id", None)
         context.user_data.pop("state", None)
+        await _after_approval(update, context, service, req)
         await query.edit_message_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
         await _notify(context, req.requester_chat_id,
                       f"Your HR request #{req.id} was approved.\nDeduct from: {month}")

@@ -90,6 +90,8 @@ class TemplateConfig(BaseModel):
     large_template: str = Field("templates/large_template.ots", description="Large template (21+ rows)")
     empty_day_template: str = Field("templates/empty-day.ots", description="Template for days with no labor")
     contractor_report_template: str = Field("templates/contractor_report_template.ots", description="Template for contractor period reports")
+    hr_advance_template: str = Field("templates/hr-advance-template.ots", description="Salary advance request template (AR variant: _ar suffix)")
+    hr_transport_template: str = Field("templates/acc-transport-template.ots", description="Transport allowance template (AR variant: _ar suffix)")
     row_thresholds: TemplateThresholdsConfig = Field(default_factory=TemplateThresholdsConfig)
 
 
@@ -239,6 +241,7 @@ class AppConfig(BaseModel):
     """
 
     template: TemplateConfig = Field(default_factory=TemplateConfig)
+    language: str = Field("en", description="Document language: en (LTR) or ar (RTL)")
     date: dict = Field(default_factory=lambda: {"cell": "B7", "day_cell": "B5"})
     table: TableConfig = Field(default_factory=TableConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)

@@ -24,6 +24,11 @@ from pathlib import Path
 from odf.draw import Frame, Image
 from odf.opendocument import OpenDocumentSpreadsheet
 from odf.style import (
+    Footer,
+    Header,
+    MasterPage,
+    PageLayout,
+    PageLayoutProperties,
     ParagraphProperties,
     Style,
     TableCellProperties,
@@ -31,7 +36,7 @@ from odf.style import (
     TextProperties,
 )
 from odf.table import Table, TableCell, TableColumn, TableRow
-from odf.text import P
+from odf.text import P, PageNumber
 
 NAVY = "#1b3a5f"
 GOLD = "#c5a04a"
@@ -67,7 +72,7 @@ LABELS = {
         "routing": "مسار الاعتماد - وقع وارخ بالترتيب",
         "pm_step": "1. اعتماد مدير المشروع", "hr_step": "2. قرار الموارد البشرية",
         "name": "الاسم", "decision": "القرار",
-        "note": "ملاحظة", "footer": "تم الإنشاء بواسطة Atlas-Bot - يحفظ مع records الرواتب",
+        "note": "ملاحظة", "footer": "تم الإنشاء بواسطة Atlas-Bot - يحفظ مع سجلات الرواتب",
     },
 }
 
@@ -125,6 +130,40 @@ def _gold_rule_cell(cell_style: str) -> TableCell:
     return cell
 
 
+def _page_setup(doc) -> str:
+    """Explicit page setup bound to the sheet.
+
+    The master page MUST be named "Default": without it LibreOffice
+    falls back to an application default that prints the sheet name
+    and page number over our content. Header/footer carry real brand
+    content. Returns the table style name for the sheet.
+    """
+    layout = PageLayout(name="atlas_a4")
+    layout.addElement(PageLayoutProperties(
+        pagewidth="21cm", pageheight="29.7cm",
+        margintop="1.5cm", marginbottom="1.5cm",
+        marginleft="1.5cm", marginright="1.5cm",
+        printorientation="portrait"))
+    doc.automaticstyles.addElement(layout)
+    master = MasterPage(name="Default", pagelayoutname="atlas_a4")
+    header = Header()
+    header_para = P()
+    header_para.addText("Atlas-Bot")
+    header.addElement(header_para)
+    master.addElement(header)
+    footer = Footer()
+    footer_para = P()
+    footer_para.addText("Page ")
+    footer_para.addElement(PageNumber())
+    footer.addElement(footer_para)
+    master.addElement(footer)
+    doc.masterstyles.addElement(master)
+    tabstyle = Style(name="tab_hr", family="table",
+                     masterpagename="Default")
+    doc.automaticstyles.addElement(tabstyle)
+    return "tab_hr"
+
+
 def build(kind: str, lang: str) -> str:
     """Author one template file. Returns output path."""
     labels = LABELS[lang]
@@ -135,6 +174,7 @@ def build(kind: str, lang: str) -> str:
     out = "templates/%s-template%s.ots" % (name, suffix)
 
     doc = OpenDocumentSpreadsheet()
+    sheet_style = _page_setup(doc)
 
     # text styles
     t_title = _text_style(doc, "t_%s_title" % lang, size="18pt", bold=True, color="#ffffff", align="center")
@@ -153,8 +193,8 @@ def build(kind: str, lang: str) -> str:
     c_gold = _cell_style(doc, "c_%s_gold" % lang, border=False)
     c_plain = _cell_style(doc, "c_%s_plain" % lang, border=False)
 
-    table = Table(name="Form")
-    for width in ("3.6cm", "6.2cm", "3.6cm", "6.2cm"):
+    table = Table(name="Sheet1", stylename=sheet_style)
+    for width in ("3.2cm", "5.6cm", "3.2cm", "5.6cm"):
         col = TableColumn()
         col_style = Style(name="col_%s_%s" % (lang, width.replace(".", "_")), family="table-column")
         col_style.addElement(TableColumnProperties(columnwidth=width))
@@ -182,8 +222,10 @@ def build(kind: str, lang: str) -> str:
     logo_cell.setAttribute("stylename", c_plain)
     logo_p = P()
     logo_p.setAttribute("stylename", t_note)
-    frame = Frame(name="Logo", width=LOGO_W, height=LOGO_H, x="0cm", y="0cm")
-    frame.addElement(Image(href="Pictures/atlas_logo.png"))
+    frame = Frame(name="Logo", width=LOGO_W, height=LOGO_H,
+                    x="0.2cm", y="0.1cm", anchortype="paragraph")
+    frame.addElement(Image(href="Pictures/atlas_logo.png", type="simple",
+                           show="embed", actuate="onLoad"))
     logo_p.addElement(frame)
     logo_cell.addElement(logo_p)
 
@@ -198,29 +240,35 @@ def build(kind: str, lang: str) -> str:
     table.addElement(header)
 
     table.addElement(row([
-        ("%s: [REF]" % labels["ref"], L, t_label, 1),
-        ("", V, t_value, 1),
-        ("%s: [DATE]" % labels["date"], L, t_label, 1),
-        ("%s: [SITE]" % labels["site"], L, t_label, 1),
+        ("%s:" % labels["ref"], L, t_label, 1),
+        ("[REF]", V, t_value, 1),
+        ("%s:" % labels["date"], L, t_label, 1),
+        ("[DATE]", V, t_value, 1),
     ]))
     table.addElement(row([
-        ("%s: [REQUESTER]" % labels["requester"], L, t_label, 1),
+        ("%s:" % labels["site"], L, t_label, 1),
+        ("[SITE]", V, t_value, 1),
         ("", V, t_value, 1),
-        ("%s: [CHAT_ID]" % labels["chat"], L, t_label, 1),
         ("", V, t_value, 1),
     ]))
     table.addElement(row([
-        ("%s: [AMOUNT]" % labels["amount"], L, t_label, 1),
-        ("", V, t_value, 1),
-        ("%s: [REASON]" % labels["reason"], L, t_label, 1),
-        ("", V, t_value, 1),
+        ("%s:" % labels["requester"], L, t_label, 1),
+        ("[REQUESTER]", V, t_value, 1),
+        ("%s:" % labels["chat"], L, t_label, 1),
+        ("[CHAT_ID]", V, t_value, 1),
+    ]))
+    table.addElement(row([
+        ("%s:" % labels["amount"], L, t_label, 1),
+        ("[AMOUNT]", V, t_value, 1),
+        ("%s:" % labels["reason"], L, t_label, 1),
+        ("[REASON]", V, t_value, 1),
     ]))
     if kind == "transport":
         table.addElement(row([
-            ("%s: [TRIP_DATE]" % labels["trip_date"], L, t_label, 1),
-            ("", V, t_value, 1),
-            ("%s: [REPORT_REF]" % labels["report_ref"], L, t_label, 1),
-            ("", V, t_value, 1),
+            ("%s:" % labels["trip_date"], L, t_label, 1),
+            ("[TRIP_DATE]", V, t_value, 1),
+            ("%s:" % labels["report_ref"], L, t_label, 1),
+            ("[REPORT_REF]", V, t_value, 1),
         ]))
         table.addElement(row([
             (labels["receipt"] + ":", L, t_label, 1),
@@ -228,25 +276,27 @@ def build(kind: str, lang: str) -> str:
         ]))
     else:
         table.addElement(row([
-            ("%s: [DED_MONTH]" % labels["ded_month"], L, t_label, 1),
-            ("", V, t_value, 3),
+            ("%s:" % labels["ded_month"], L, t_label, 1),
+            ("[DED_MONTH]", V, t_value, 1),
+            ("", V, t_value, 1),
+            ("", V, t_value, 1),
         ]))
     table.addElement(row([(labels["routing"], c_band, t_band, 4)]))
     table.addElement(row([
-        ("%s: [PM_DECISION]" % labels["pm_step"], L, t_label, 1),
-        ("%s: [PM_NAME]" % labels["name"], V, t_value, 1),
-        ("%s: [PM_DATE]" % labels["date"], L, t_label, 1),
-        ("", V, t_value, 1),
+        ("%s:" % labels["pm_step"], L, t_label, 1),
+        ("[PM_DECISION]", V, t_value, 1),
+        ("%s:" % labels["name"], L, t_label, 1),
+        ("[PM_SIG]", V, t_value, 1),
     ]))
     table.addElement(row([
-        ("%s: [HR_DECISION]" % labels["hr_step"], L, t_label, 1),
-        ("%s: [HR_NAME]" % labels["name"], V, t_value, 1),
-        ("%s: [HR_DATE]" % labels["date"], V, t_value, 1),
-        ("", V, t_value, 1),
+        ("%s:" % labels["hr_step"], L, t_label, 1),
+        ("[HR_DECISION]", V, t_value, 1),
+        ("%s:" % labels["name"], L, t_label, 1),
+        ("[HR_SIG]", V, t_value, 1),
     ]))
     table.addElement(row([
-        ("%s: [NOTE]" % labels["note"], L, t_label, 1),
-        ("", V, t_value, 3),
+        ("%s:" % labels["note"], L, t_label, 1),
+        ("[NOTE]", V, t_value, 3),
     ]))
     gold_row = TableRow()
     gold_row.addElement(_gold_rule_cell(c_gold))

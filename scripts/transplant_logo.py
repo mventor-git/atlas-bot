@@ -1,8 +1,15 @@
-"""Transplant a logo PNG into a .ots template; optionally rebrand text.
+"""Transplant a logo PNG into a .ots template + fix brand strings.
 
 Fork helper: public templates ship generic; the company fork re-applies
-branding with this script. Zip-surgery for the image (deterministic),
-odfpy DOM for text.
+branding with this script.
+
+LIMITATION (verified 2026-09-08): draw:frames authored by odfpy inside
+Calc cells do NOT paint in headless PDF export (Calc floats drawings;
+odfpy cannot express sheet-anchored placement). To place a logo: open
+the template once in LibreOffice, drag the image into the header cell,
+save. The filler never touches that cell, so the logo survives fills.
+This script's text-rebrand path works fine headless.
+"""
 
 Usage:
     python scripts/transplant_logo.py <template.ots> [--logo IMG.png --as NAME]
@@ -40,6 +47,11 @@ def main() -> int:
         from odf.text import P
 
         doc = load(str(tpl))
+        # Idempotent: skip when this logo is already embedded
+        with zipfile.ZipFile(tpl, "r") as _z:
+            if "Pictures/" + args.as_name in _z.namelist():
+                print("SKIP (already embedded):", tpl)
+                return 0
         if args.brand_from and args.brand_to:
             old_b = args.brand_from.encode("utf-8")
             new_b = args.brand_to.encode("utf-8")
@@ -55,9 +67,11 @@ def main() -> int:
             cell = row.getElementsByType(TableCell)[0]
             p = P()
             frame = Frame(
-                name="Logo", width=args.width, height=args.height, x="0cm", y="0cm"
+                name="Logo", width=args.width, height=args.height,
+                x="0cm", y="0cm", anchortype="as-char",
             )
-            frame.addElement(Image(href="Pictures/" + args.as_name))
+            frame.addElement(Image(href="Pictures/" + args.as_name, type="simple",
+                                     show="embed", actuate="onLoad"))
             p.addElement(frame)
             cell.addElement(p)
         doc.save(str(tpl))
