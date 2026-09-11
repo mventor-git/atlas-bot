@@ -212,6 +212,23 @@ class UserRepository:
         logger.info("User %s assigned to site %s", chat_id, site_id)
         return user
 
+    def set_salary(self, chat_id: str, amount: float) -> Optional[User]:
+        """Set a user's contracted monthly base pay."""
+        if amount is None or float(amount) < 0:
+            raise DatabaseError("Salary must be a non-negative number.")
+        user = self.get_by_chat_id(chat_id)
+        if user is None:
+            return None
+        user.monthly_salary = float(amount)
+        user.updated_at = datetime.now().isoformat()
+        self._db.execute(
+            "UPDATE users SET monthly_salary = ?, updated_at = ? WHERE chat_id = ?",
+            (user.monthly_salary, user.updated_at, chat_id),
+        )
+        self._db.commit()
+        logger.info("User %s salary set to %s", chat_id, amount)
+        return user
+
     def delete(self, chat_id: str) -> bool:
         """Delete a user by chat ID.
 
@@ -256,5 +273,6 @@ class UserRepository:
             approved_by=self._safe_get(row, "approved_by"),
             approved_at=self._safe_get(row, "approved_at"),
             site_id=self._safe_get(row, "site_id") or "default",
+            monthly_salary=self._safe_get(row, "monthly_salary"),
             updated_at=row["updated_at"],
         )

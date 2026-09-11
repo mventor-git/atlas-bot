@@ -422,6 +422,9 @@ class User:
     site_id: Optional[str] = None
     """Assigned site (multi-site notify/print targeting; env SITE_ID when unset)."""
 
+    monthly_salary: Optional[float] = None
+    """Contracted monthly base pay (020 payroll; None = unset)."""
+
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     """ISO datetime of last update."""
 
