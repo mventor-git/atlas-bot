@@ -164,12 +164,12 @@ CREATE TABLE IF NOT EXISTS contractors (
 
 CREATE INDEX IF NOT EXISTS idx_contractors_name ON contractors(name);
 
--- HR requests (advance + transport allowance chain)
+-- HR requests (advance + transport + leave + mission + overtime chain)
 CREATE TABLE IF NOT EXISTS hr_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requester_chat_id TEXT NOT NULL,
     requester_name TEXT NOT NULL,
-    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport')),
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime')),
     amount REAL NOT NULL,
     reason TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
@@ -177,6 +177,9 @@ CREATE TABLE IF NOT EXISTS hr_requests (
     report_ref TEXT,
     receipt_path TEXT,
     deduction_month TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    hours REAL,
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
     assigned_to TEXT,
@@ -376,7 +379,7 @@ CREATE TABLE IF NOT EXISTS hr_requests (
     id SERIAL PRIMARY KEY,
     requester_chat_id TEXT NOT NULL,
     requester_name TEXT NOT NULL,
-    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport')),
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime')),
     amount REAL NOT NULL,
     reason TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
@@ -384,6 +387,9 @@ CREATE TABLE IF NOT EXISTS hr_requests (
     report_ref TEXT,
     receipt_path TEXT,
     deduction_month TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    hours REAL,
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
     assigned_to TEXT,
@@ -502,6 +508,8 @@ class DatabaseManager:
 
         # Tenant scoping columns on both backends (idempotent).
         self.ensure_site_columns()
+        # HR table widening for leave/mission/overtime (idempotent).
+        self._ensure_hr_requests_v2()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
         self._ensure_site_uniques()
 
@@ -601,6 +609,77 @@ class DatabaseManager:
                 )
                 self.commit()
                 logger.info("Added site_id to %s.", table)
+
+    def _ensure_hr_requests_v2(self) -> None:
+        """Widen hr_requests for leave/mission/overtime on old DBs.
+
+        Rebuilds (rename → create → copy → drop) when the new columns
+        or types are missing. FK enforcement stays ON: pg RENAME keeps
+        OID references intact; SQLite path disables FK during the swap
+        (DROP TABLE would otherwise cascade child money rows).
+        Idempotent: no-op when start_date exists with the v2 CHECK.
+        """
+        if not self.table_exists("hr_requests"):
+            return  # fresh installs get v2 DDL directly
+        if self.column_exists("hr_requests", "start_date"):
+            return
+        cols = ("id, requester_chat_id, requester_name, request_type,"
+                " amount, reason, site_id, trip_date, report_ref,"
+                " receipt_path, deduction_month, status, assigned_to,"
+                " delegated, note, signatures, pdf_path, created_at,"
+                " updated_at")
+        try:
+            conn = self._get_connection()
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("ALTER TABLE hr_requests RENAME TO hr_requests_old")
+            conn.execute(
+                """CREATE TABLE hr_requests (
+                    id %s,
+                    requester_chat_id TEXT NOT NULL,
+                    requester_name TEXT NOT NULL,
+                    request_type TEXT NOT NULL CHECK (request_type IN
+                        ('advance', 'transport', 'leave', 'mission', 'overtime')),
+                    amount REAL NOT NULL,
+                    reason TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
+                    trip_date TEXT,
+                    report_ref TEXT,
+                    receipt_path TEXT,
+                    deduction_month TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    hours REAL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
+                    assigned_to TEXT,
+                    delegated INTEGER NOT NULL DEFAULT 0,
+                    note TEXT,
+                    signatures TEXT NOT NULL DEFAULT '[]',
+                    pdf_path TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                )""" % ("SERIAL PRIMARY KEY" if self._pg else "INTEGER PRIMARY KEY AUTOINCREMENT")
+            )
+            conn.execute(
+                "INSERT INTO hr_requests (%s) SELECT %s FROM hr_requests_old" % (cols, cols)
+            )
+            conn.execute("DROP TABLE hr_requests_old")
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=ON")
+            conn.commit()
+            logger.info("hr_requests widened to v2 (leave/mission/overtime).")
+        except _DB_ERRORS as e:
+            try:
+                if not self._pg:
+                    conn.execute("PRAGMA foreign_keys=ON")
+            except _DB_ERRORS:
+                pass
+            conn.rollback()
+            raise DatabaseError(
+                f"Failed to widen hr_requests: {e}",
+                original_exception=e,
+            ) from e
 
     def _ensure_site_uniques(self) -> None:
         """Replace global UNIQUE(date) with UNIQUE(date, site_id) on old DBs.

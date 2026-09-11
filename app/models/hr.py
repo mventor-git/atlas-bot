@@ -16,6 +16,9 @@ from typing import Optional
 class HRRequestType:
     ADVANCE = "advance"
     TRANSPORT = "transport"
+    LEAVE = "leave"
+    MISSION = "mission"
+    OVERTIME = "overtime"
 
 
 class HRRequestStatus:
@@ -58,6 +61,14 @@ class HRRequest:
     # Advance-only fields
     deduction_month: Optional[str] = None
     """YYYY-MM picked by the approver on approval."""
+
+    # Leave/mission/overtime payload
+    start_date: Optional[str] = None
+    """Start date (YYYY-MM-DD)."""
+    end_date: Optional[str] = None
+    """End date (YYYY-MM-DD, leave/mission)."""
+    hours: Optional[float] = None
+    """Requested hours (overtime)."""
 
     # Chain state
     status: str = HRRequestStatus.PENDING

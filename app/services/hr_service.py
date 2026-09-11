@@ -91,6 +91,69 @@ class HRService:
             site_id=site_id or driver.site_id(),
         ))
 
+    def request_leave(
+        self, chat_id: str, name: str, reason: str,
+        start_date: str, end_date: str, site_id: str | None = None,
+    ) -> HRRequest:
+        """File a leave request (date range + reason, no money leg)."""
+        start, end = self._check_range(start_date, end_date)
+        if not (reason or "").strip():
+            raise DatabaseError("Leave reason is required.")
+        return self._repo.add(HRRequest(
+            requester_chat_id=chat_id,
+            requester_name=name,
+            request_type=HRRequestType.LEAVE,
+            amount=0,
+            reason=reason.strip(),
+            start_date=start,
+            end_date=end,
+            site_id=site_id or driver.site_id(),
+        ))
+
+    def request_mission(
+        self, chat_id: str, name: str, reason: str,
+        start_date: str, end_date: str = "", site_id: str | None = None,
+    ) -> HRRequest:
+        """File a mission request (purpose + dates; payroll effect flagged later)."""
+        end = end_date.strip() or start_date.strip()
+        start, end = self._check_range(start_date, end)
+        if not (reason or "").strip():
+            raise DatabaseError("Mission purpose is required.")
+        return self._repo.add(HRRequest(
+            requester_chat_id=chat_id,
+            requester_name=name,
+            request_type=HRRequestType.MISSION,
+            amount=0,
+            reason=reason.strip(),
+            start_date=start,
+            end_date=end,
+            site_id=site_id or driver.site_id(),
+        ))
+
+    def request_overtime(
+        self, chat_id: str, name: str, date_str: str, hours: float,
+        reason: str = "", site_id: str | None = None,
+    ) -> HRRequest:
+        """File an overtime request (date + hours; presence alone never approves)."""
+        try:
+            value = float(hours)
+        except (TypeError, ValueError):
+            raise DatabaseError("Overtime hours must be a number.")
+        if value <= 0 or value > 24:
+            raise DatabaseError("Overtime hours must be within (0, 24].")
+        day = self._check_date(date_str, "Overtime date")
+        return self._repo.add(HRRequest(
+            requester_chat_id=chat_id,
+            requester_name=name,
+            request_type=HRRequestType.OVERTIME,
+            amount=0,
+            reason=(reason or "").strip() or "overtime",
+            start_date=day,
+            end_date=day,
+            hours=value,
+            site_id=site_id or driver.site_id(),
+        ))
+
     # --- Chain transitions ---
 
     def confirm_pm(
@@ -176,6 +239,8 @@ class HRService:
         req = self._get(request_id, site_id)
         if req.status != HRRequestStatus.APPROVED:
             raise DatabaseError("Payouts record only on approved requests.")
+        if req.request_type not in (HRRequestType.ADVANCE, HRRequestType.TRANSPORT):
+            raise DatabaseError("Only advance/transport requests carry payouts.")
         self._check_amount(amount)
         return self._money_or_raise().record_payout(PayoutEvent(
             request_id=req.id, amount=float(amount),
@@ -210,6 +275,15 @@ class HRService:
                          site_id: str | None = None) -> dict:
         """Derived financial state from the event ledger (never stored)."""
         req = self._get(request_id, site_id)
+        if req.request_type not in (HRRequestType.ADVANCE, HRRequestType.TRANSPORT):
+            # Leave/mission/overtime carry no money leg: approval closes.
+            state = "open"
+            if req.status == HRRequestStatus.APPROVED:
+                state = "closed"
+            elif req.status == HRRequestStatus.REJECTED:
+                state = "rejected"
+            return {"state": state, "paid": 0, "required": 0,
+                    "disputed": self._is_disputed(req)}
         money = self._money_or_raise()
         paid = money.paid_total(req.id, site_id=req.site_id)
         deducted = money.deducted_total(req.id, site_id=req.site_id)
@@ -321,6 +395,25 @@ class HRService:
         if req is None:
             raise DatabaseError(f"HR request {request_id} not found in this site.")
         return req
+
+    @staticmethod
+    def _check_date(value: str, label: str) -> str:
+        from datetime import date as _date
+
+        text = (value or "").strip()
+        try:
+            _date.fromisoformat(text)
+        except ValueError:
+            raise DatabaseError(f"{label} must be YYYY-MM-DD.")
+        return text
+
+    @classmethod
+    def _check_range(cls, start_date: str, end_date: str) -> tuple[str, str]:
+        start = cls._check_date(start_date, "Start date")
+        end = cls._check_date(end_date, "End date")
+        if end < start:
+            raise DatabaseError("End date must not precede start date.")
+        return start, end
 
     @staticmethod
     def _check_amount(amount: float) -> None:
