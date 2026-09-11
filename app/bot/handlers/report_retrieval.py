@@ -195,6 +195,10 @@ async def get_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         /get yesterday
         /get 12/07/2026
     """
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     args = context.args
 
     if not args:
@@ -244,6 +248,11 @@ async def handle_date_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if not is_likely_date(text):
         return False
+
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return True
 
     parsed = parse_date_string(text)
     if parsed is None:

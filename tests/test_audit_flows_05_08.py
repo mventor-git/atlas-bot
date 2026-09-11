@@ -183,7 +183,7 @@ class TestFlow5_ViewReport:
 
         update.message.reply_text.assert_called_once()
         call_text = update.message.reply_text.call_args[0][0]
-        assert "don't have permission" in call_text.lower()
+        assert "awaiting approval" in call_text.lower()
 
 
 # =========================================================================

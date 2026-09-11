@@ -928,7 +928,7 @@ class TestAsyncHandlers:
         from app.bot.handlers.search import search_command
 
         update = MockHelpers.mock_update(message_text="/search")
-        context = MockHelpers.mock_context(user_data={})
+        context = MockHelpers.mock_context(user_data={}, user_role="viewer")
 
         await search_command(update, context)
 
@@ -1304,6 +1304,7 @@ class TestSearchLogic:
                 "last_search_total_pages": 3,
                 "last_search_page_size": 5,
             },
+            user_role="viewer",
             bot_data={"universal_search_service": search_service},
         )
 
@@ -1551,7 +1552,8 @@ class TestHandlerErrorHandling:
         update = MockHelpers.mock_update(message_text="/preview")
         repo_mock = MagicMock()
         repo_mock.get_by_date.return_value = None
-        context = MockHelpers.mock_context(bot_data={"report_repository": repo_mock})
+        context = MockHelpers.mock_context(
+            user_role="viewer", bot_data={"report_repository": repo_mock})
 
         await preview_pdf_command(update, context)
 
