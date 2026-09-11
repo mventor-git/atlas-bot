@@ -271,6 +271,27 @@ CREATE TABLE IF NOT EXISTS attendance_events (
 CREATE INDEX IF NOT EXISTS idx_attendance_chat_date ON attendance_events(chat_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance_events(site_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_events(status);
+
+-- Case events (014 P6a; filed -> under_review -> resolved, filer appeal)
+CREATE TABLE IF NOT EXISTS case_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    case_type TEXT NOT NULL
+        CHECK (case_type IN ('grievance', 'complaint', 'suggestion', 'resignation')),
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'filed'
+        CHECK (status IN ('filed', 'under_review', 'resolved', 'appealed')),
+    reviewed_by TEXT,
+    resolved_by TEXT,
+    resolution_note TEXT,
+    appeal_note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_reporter ON case_events(reporter_chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_case_site_status ON case_events(site_id, status);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -508,6 +529,26 @@ CREATE TABLE IF NOT EXISTS attendance_events (
 CREATE INDEX IF NOT EXISTS idx_attendance_chat_date ON attendance_events(chat_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance_events(site_id, event_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_events(status);
+
+CREATE TABLE IF NOT EXISTS case_events (
+    id SERIAL PRIMARY KEY,
+    reporter_chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    case_type TEXT NOT NULL
+        CHECK (case_type IN ('grievance', 'complaint', 'suggestion', 'resignation')),
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'filed'
+        CHECK (status IN ('filed', 'under_review', 'resolved', 'appealed')),
+    reviewed_by TEXT,
+    resolved_by TEXT,
+    resolution_note TEXT,
+    appeal_note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_reporter ON case_events(reporter_chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_case_site_status ON case_events(site_id, status);
 """
 
 
