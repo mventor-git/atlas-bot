@@ -352,7 +352,7 @@ class TestFlow12_Search:
         from app.bot.handlers.search import search_command
 
         update = MockHelpers.mock_update(message_text="/search")
-        context = MockHelpers.mock_context(user_data={})
+        context = MockHelpers.mock_context(user_data={}, user_role="viewer")
 
         await search_command(update, context)
 
@@ -376,6 +376,7 @@ class TestFlow12_Search:
 
         context = MockHelpers.mock_context(
             user_data={"state": "awaiting_search_query"},
+            user_role="viewer",
             bot_data={
                 "universal_search_service": search_service_mock,
                 "report_repository": MagicMock(),
@@ -404,6 +405,7 @@ class TestFlow12_Search:
 
         context = MockHelpers.mock_context(
             user_data={"state": "awaiting_search_query"},
+            user_role="viewer",
             bot_data={
                 "universal_search_service": search_service_mock,
                 "report_repository": MagicMock(),
@@ -430,6 +432,7 @@ class TestFlow12_Search:
         repo_mock.get_by_date.return_value = report
 
         context = MockHelpers.mock_context(
+            user_role="viewer",
             bot_data={"report_repository": repo_mock},
         )
 
@@ -462,6 +465,7 @@ class TestFlow12_Search:
                 "last_search_total_pages": 2,
                 "last_search_page_size": 5,
             },
+            user_role="viewer",
             bot_data={
                 "universal_search_service": search_service_mock,
             },

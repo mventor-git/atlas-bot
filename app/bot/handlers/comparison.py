@@ -22,6 +22,10 @@ async def compare_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     Usage: /compare
     The user will be prompted for two dates via two steps.
     """
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     context.user_data["state"] = "awaiting_compare_date_a"
     await update.message.reply_text(
         "\U0001f4ca *Daily Report Comparison*\n\n"
@@ -38,6 +42,11 @@ async def handle_compare_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     - 'awaiting_compare_date_a': first date
     - 'awaiting_compare_date_b': second date (perform comparison)
     """
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        context.user_data.pop("state", None)
+        return
     state = context.user_data.get("state")
 
     if state == "awaiting_compare_date_a":

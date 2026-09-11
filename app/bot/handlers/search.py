@@ -34,6 +34,10 @@ logger = get_logger(__name__)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start search flow."""
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     context.user_data["state"] = "awaiting_search_query"
     await update.message.reply_text(
         "🔍 *Search Reports*\n\n"
@@ -100,6 +104,11 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     if context.user_data.get("state") != "awaiting_search_query":
         return
 
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        context.user_data.pop("state", None)
+        return
     query_text = update.message.text.strip()
     search_service: UniversalSearchService | None = context.bot_data.get("universal_search_service")
     repo: ReportRepository = context.bot_data["report_repository"]
@@ -148,6 +157,10 @@ async def handle_view_report_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
 
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     date_str = query.data.replace("view_report:", "")
     repo: ReportRepository = context.bot_data["report_repository"]
 
@@ -168,6 +181,10 @@ async def handle_search_page(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     page = int(query.data.replace("search_page:", ""))
     query_text = context.user_data.get("last_search_query_text", "")
     total_pages = context.user_data.get("last_search_total_pages", 1)
@@ -197,6 +214,11 @@ async def handle_new_search(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Start a new search."""
     query = update.callback_query
     await query.answer()
+
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     context.user_data["state"] = "awaiting_search_query"
     await query.edit_message_text(
         "🔍 Send a date (YYYY-MM-DD), contractor name, or keyword to search.",

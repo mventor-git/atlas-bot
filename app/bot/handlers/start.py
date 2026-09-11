@@ -388,6 +388,19 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
     role = _get_role(context, telegram_user)
     auth = _get_auth(context)
 
+    # Quarantine: misconfigured auth denies everything but help;
+    # pending/rejected users see nothing but help.
+    if auth is None:
+        if data != "help":
+            await query.edit_message_text("Authorization not available. Please try again later.")
+            return
+    elif role in ("pending", "rejected", "unknown") and data != "help":
+        from app.bot.handlers._authz import PENDING_MSG, DENIED
+
+        await query.edit_message_text(
+            PENDING_MSG if role == "pending" else DENIED)
+        return
+
     # Guard: if no auth service is available, deny all non-read operations
     if auth is None and data not in ("dashboard", "view_report", "search", "help", "contractor_reports"):
         await query.edit_message_text("Authorization not available. Please try again later.")
@@ -936,6 +949,11 @@ async def handle_contractor_report_period(update: Update, context: ContextTypes.
     """Handle contractor report period selection callback."""
     query = update.callback_query
     await query.answer()
+
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     telegram_user = str(update.effective_user.id)
     period = query.data.replace("report_period:", "")
 
@@ -985,6 +1003,11 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
     """Handle contractor selection from inline keyboard in contractor reports flow."""
     query = update.callback_query
     await query.answer()
+
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     telegram_user = str(update.effective_user.id)
 
     contractor_idx_str = query.data.replace("rc:", "")
@@ -1170,6 +1193,11 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
 
 async def handle_contractor_report_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle contractor name input for contractor reports PDF generation."""
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        context.user_data.pop("state", None)
+        return
     telegram_user = str(update.effective_user.id)
     period = context.user_data.get("contractor_report_period", "")
     contractor_name = update.message.text.strip()
@@ -1327,13 +1355,13 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
 
 async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /view command - view today's report."""
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     telegram_user = str(update.effective_user.id)
     role = _get_role(context, telegram_user)
     auth = _get_auth(context)
-
-    if not auth.can_view_reports(telegram_user):
-        await update.message.reply_text("You don't have permission to view reports.")
-        return
 
     today = date.today().isoformat()
 
@@ -1382,6 +1410,10 @@ async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /preview command - generate PDF preview."""
+    from app.bot.handlers._authz import require_view
+
+    if not await require_view(update, context):
+        return
     telegram_user = str(update.effective_user.id)
     today = date.today().isoformat()
 
@@ -1413,7 +1445,7 @@ async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info("Preview PDF generated and sent for %s: %s", today, pdf_path)
         else:
             await update.message.reply_text(
-                "\U0001f4c4 PDF generation requires Excel to be installed.",
+                "\U0001f4c4 PDF generation requires LibreOffice to be installed.",
                 parse_mode="Markdown",
             )
     except Exception as e:

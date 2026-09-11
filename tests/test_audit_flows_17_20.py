@@ -412,7 +412,7 @@ class TestFlow20AuthorizationEdgeCases:
         await view_command(update, context)
 
         update.message.reply_text.assert_called_once()
-        assert "don't have permission" in update.message.reply_text.call_args[0][0]
+        assert "awaiting approval" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_20b_viewer_cannot_create_report(self):
