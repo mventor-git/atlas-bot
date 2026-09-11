@@ -61,6 +61,18 @@ def main() -> int:
 
     db = DatabaseManager("ignored-on-postgres")
     check("manager boots on postgres", True)
+    # Prologue: remove rows from previous runs (same scratch date/sites)
+    db.execute("DELETE FROM report_items WHERE report_id IN "
+               "(SELECT id FROM reports WHERE date = '2026-09-10')")
+    db.execute("DELETE FROM reports WHERE date = '2026-09-10'")
+    for chat in ("w1", "w2", "w3", "9002", "u1", "u2", "u3", "9001"):
+        db.execute("DELETE FROM users WHERE chat_id = ?", (chat,))
+    db.execute("DELETE FROM hr_requests WHERE requester_chat_id IN ('w1', 'u1')")
+    db.execute("DELETE FROM payout_events WHERE request_id NOT IN (SELECT id FROM hr_requests)")
+    db.execute("DELETE FROM deduction_events WHERE request_id NOT IN (SELECT id FROM hr_requests)")
+    db.execute("DELETE FROM event_log WHERE telegram_user IN ('w1', 'u1')")
+    db.execute("DELETE FROM user_activity_log WHERE telegram_user IN ('w1', 'u1')")
+    db.commit()
     check("reports table exists", db.table_exists("reports"))
     check("site_id column exists", db.column_exists("reports", "site_id"))
 
@@ -74,8 +86,8 @@ def main() -> int:
 
     rep = reports.add(Report(
         date="2026-09-10", day="Wednesday", status=ReportStatus.DRAFT,
-        telegram_user="u1", site_id="pg-a",
-        items=[ReportItem(contractor="PG Co", type="Civil", zone="Z",
+        telegram_user="w1", site_id="pg-a",
+        items=[ReportItem(contractor="PG2 Co", type="Civil", zone="Z",
                           workers=7, details="d")]))
     check("insert returns id (RETURNING)", isinstance(rep.id, int))
     check("item got id", isinstance(rep.items[0].id, int))
@@ -84,38 +96,62 @@ def main() -> int:
 
     os.environ["SITE_ID"] = "pg-b"
     reports.add(Report(date="2026-09-10", day="Wednesday",
-                       status=ReportStatus.DRAFT, telegram_user="u2",
+                       status=ReportStatus.DRAFT, telegram_user="w2",
                        site_id="pg-b"))
     check("same date second site ok (composite unique)", True)
     try:
         reports.add(Report(date="2026-09-10", day="Wednesday",
-                           status=ReportStatus.DRAFT, telegram_user="u3",
+                           status=ReportStatus.DRAFT, telegram_user="w3",
                            site_id="pg-b"))
         check("duplicate same site rejected", False)
     except DatabaseError:
         check("duplicate same site rejected", True)
 
-    entry = events.log(telegram_user="u1", action="test.pg")
+    entry = events.log(telegram_user="w1", action="test.pg")
     check("event stamped + id", isinstance(entry.id, int) and entry.site_id == "pg-b")
 
-    audit.log_added(telegram_user="u1", user_role="admin", report_date="2026-09-10",
-                    report_status="final", contractor_name="PG Co", workers=7)
+    audit.log_added(telegram_user="w1", user_role="admin", report_date="2026-09-10",
+                    report_status="final", contractor_name="PG2 Co", workers=7)
     check("audit rows scoped",
-          len(audit.get_by_user("u1")) == 1 and audit.get_recent_by_all_users() != [])
+          len(audit.get_by_user("w1")) == 1 and audit.get_recent_by_all_users() != [])
 
-    recent.record_usage("u1", "PG Co")
-    check("recent usage recorded", len(recent.get_recent_for_user("u1")) == 1)
+    recent.record_usage("w1", "PG2 Co")
+    check("recent usage recorded", len(recent.get_recent_for_user("w1")) == 1)
 
-    users.upsert(User(chat_id="9001", role="hr", site_id="pg-b"))
+    users.upsert(User(chat_id="9002", role="hr", site_id="pg-b"))
     check("hr role CHECK passes on postgres",
-          users.get_by_chat_id("9001").role == "hr")
+          users.get_by_chat_id("9002").role == "hr")
     check("users scoped by site",
-          [u.chat_id for u in users.get_users_by_site("pg-b")] == ["9001"])
+          [u.chat_id for u in users.get_users_by_site("pg-b")] == ["9002"])
+
+    from app.repositories.hr_repository import HRRepository
+    from app.repositories.membership_repository import MembershipRepository
+    from app.repositories.money_repository import MoneyRepository
+    from app.models.hr import HRRequest
+    from app.services.hr_service import HRService
+
+    hr = HRService(HRRepository(db), MoneyRepository(db))
+    check("hr_requests table exists", db.table_exists("hr_requests"))
+    check("money tables exist",
+          db.table_exists("payout_events") and db.table_exists("deduction_events"))
+    check("memberships table exists", db.table_exists("user_site_memberships"))
+    req = hr.request_advance("w1", "PG User", 1000, "test", site_id="pg-b")
+    check("hr request stamped", isinstance(req.id, int) and req.site_id == "pg-b")
+    hr.confirm_pm(req.id, "pm1", "PM", site_id="pg-b")
+    hr.decide_hr(req.id, "hr1", "HR", True, deduction_month="2026-10", site_id="pg-b")
+    hr.record_payout(req.id, 1000, "2026-09-10", "fin1", site_id="pg-b")
+    hr.record_deduction(req.id, 1000, "2026-10", "pay1", site_id="pg-b")
+    check("ledger derived closed",
+          hr.financial_status(req.id, site_id="pg-b")["state"] == "closed")
+    members = MembershipRepository(db)
+    members.grant("w1", "pg-b", ["view_site_reports"])
+    check("membership grant + read",
+          members.find("w1", "pg-b") is not None)
 
     # cleanup own rows
     for r in reports.get_all(site_id="pg-a") + reports.get_all(site_id="pg-b"):
         reports.delete(r.id, site_id=r.site_id)
-    users.delete("9001")
+    users.delete("9002")
     db.close_all()
     check("cleanup ok", True)
     print(f"\nALL {len(CHECKS)} LIVE-PG CHECKS PASSED")
