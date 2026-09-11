@@ -139,6 +139,74 @@ class TestSplitRender:
         assert self._row_for(_texts(out), "OldCo")[6] == ""
 
 
+def _relabel_header(src: str, dst: str, updates: dict):
+    """Copy a shipped template with header cell renames (024 fixture)."""
+    from app.libre import ots as _ots
+
+    doc = _ots.load_doc(src)
+    table = _ots.first_table(doc)
+    h = _ots.find_first(table, ("Contractor",))
+    cells = _ots.logical_cells(
+        table.getElementsByType(_ots.TableRow)[h])
+    for idx, text in updates.items():
+        _ots.set_cell_text(cells[idx], text)
+    _ots.save(doc, dst)
+
+
+SMALL = "templates/contractor-daily-labor-template.ods"
+
+
+class TestDedicatedColumns:
+    """024: header-driven columns; owner-inserted Craftsmen/Helpers."""
+
+    def test_split_columns_fill_and_total(self, config, temp_dir: Path):
+        tpl = temp_dir / "split.ods"
+        _relabel_header(SMALL, str(tpl),
+                        {7: "Craftsmen", 8: "Helpers"})
+        cfg = config.model_copy(update={"template": config.template.model_copy(
+            update={"small_template": str(tpl)})})
+        rep = Report(
+            date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
+            items=[
+                ReportItem(contractor="A Co", workers=10, craftsmen=7,
+                           helpers=3),
+                ReportItem(contractor="B Co", workers=7, craftsmen=2),
+                ReportItem(contractor="C Co", workers=4),
+            ])
+        out = Path(TemplateFiller(cfg).fill(rep, str(temp_dir / "r.ods")))
+        grid = _texts(out)
+        a, b, c = (self._row_for(grid, n) for n in ("A Co", "B Co", "C Co"))
+        assert (a[5], a[7], a[8], a[6]) == ("10", "7", "3", "")
+        assert (b[5], b[7], b[8]) == ("7", "2", "5")  # helpers derived
+        assert (c[7], c[8]) == ("", "")              # unknown, never 0
+        (tot,) = [r for r in grid if r[2:6] and "Total:" in " ".join(r)]
+        assert tot[5] == "21" and tot[7] == "9" and tot[8] == "8"
+
+    def _row_for(self, grid, contractor):
+        (row,) = [r for r in grid if len(r) > 8 and r[2] == contractor]
+        return row
+
+    def test_missing_workers_header_fails_loudly(self, config, temp_dir: Path):
+        from app.libre.filler import LibreFillError
+
+        tpl = temp_dir / "broken.ods"
+        _relabel_header(SMALL, str(tpl), {5: "People"})
+        cfg = config.model_copy(update={"template": config.template.model_copy(
+            update={"small_template": str(tpl)})})
+        with pytest.raises(LibreFillError):
+            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "x.ods"))
+
+    def test_ambiguous_headers_fail_loudly(self, config, temp_dir: Path):
+        from app.libre.filler import LibreFillError
+
+        tpl = temp_dir / "dupe.ods"
+        _relabel_header(SMALL, str(tpl), {2: "Contractor + Helpers"})
+        cfg = config.model_copy(update={"template": config.template.model_copy(
+            update={"small_template": str(tpl)})})
+        with pytest.raises(LibreFillError):
+            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "y.ods"))
+
+
 class TestContractorReport:
     def _entries(self):
         return [
