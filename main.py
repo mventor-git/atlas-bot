@@ -54,6 +54,8 @@ from app.services.add_contractor_service import AddContractorService
 from app.services.hr_service import HRService
 from app.services.case_service import CaseService
 from app.repositories.case_repository import CaseRepository
+from app.services.discipline_service import DisciplineService
+from app.repositories.discipline_repository import DisciplineRepository
 from app.services.attendance_service import AttendanceService
 from app.repositories.attendance_repository import AttendanceRepository
 from app.services.audit_service import AuditService
@@ -264,6 +266,7 @@ def main() -> None:
         hr_service = HRService(HRRepository(db_manager), MoneyRepository(db_manager))  # HR advances + transport
         attendance_service = AttendanceService(AttendanceRepository(db_manager))
         case_service = CaseService(CaseRepository(db_manager))
+        discipline_service = DisciplineService(DisciplineRepository(db_manager))
 
         logger.info("All services initialized.")
 
@@ -308,6 +311,7 @@ def main() -> None:
             user_repository=user_repo,
             attendance_service=attendance_service,
             case_service=case_service,
+            discipline_service=discipline_service,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop
