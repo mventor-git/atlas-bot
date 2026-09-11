@@ -35,6 +35,22 @@ class LibreFillError(LaborReportError):
         return "An error occurred while generating the report file. Please try again."
 
 
+def details_text(item) -> str:
+    """Print text for the "detailed number" column (G) (023).
+
+    Manual details win verbatim; the craftsmen split renders as "C+H".
+    Legacy items with no split print empty (unknown is never rendered
+    as zeros).
+    """
+    if item.details and item.details.strip():
+        return item.details
+    if item.craftsmen is None:
+        return ""
+    helpers = item.helpers if item.helpers is not None else \
+        (item.workers or 0) - item.craftsmen
+    return f"{item.craftsmen}+{helpers}"
+
+
 class TemplateFiller:
     """Fills a daily report .ots template with report data.
 
@@ -136,7 +152,7 @@ class TemplateFiller:
             ots.set_cell_text(cells[COL_TYPE], item.type or "")
             ots.set_cell_text(cells[COL_ZONE], item.zone or "")
             ots.set_cell_text(cells[COL_WORKERS], str(workers))
-            ots.set_cell_text(cells[COL_DETAILS], item.details or "")
+            ots.set_cell_text(cells[COL_DETAILS], details_text(item))
         return total
 
     def _fill_totals(self, table, total: int) -> None:

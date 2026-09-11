@@ -190,7 +190,9 @@ class ValidationService:
 
         # --- Empty details ---
         if rules.warn_empty_details:
-            if not item.details or not item.details.strip():
+            from app.libre.filler import details_text
+
+            if not details_text(item):
                 warnings.append(ValidationWarning(
                     field="details",
                     message=f"No details provided for '{item.contractor or 'unknown'}'. Consider adding a worker breakdown.",
