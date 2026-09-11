@@ -292,6 +292,27 @@ CREATE TABLE IF NOT EXISTS case_events (
 
 CREATE INDEX IF NOT EXISTS idx_case_reporter ON case_events(reporter_chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_case_site_status ON case_events(site_id, status);
+
+-- Discipline events (017 014c; filed -> under_review -> decided, subject appeal)
+CREATE TABLE IF NOT EXISTS discipline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_chat_id TEXT NOT NULL,
+    filed_by TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'filed'
+        CHECK (status IN ('filed', 'under_review', 'decided', 'appealed')),
+    reviewed_by TEXT,
+    decided_by TEXT,
+    decision TEXT,
+    decision_note TEXT,
+    appeal_note TEXT,
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_discipline_subject ON discipline_events(subject_chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_discipline_site_status ON discipline_events(site_id, status);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -549,6 +570,26 @@ CREATE TABLE IF NOT EXISTS case_events (
 
 CREATE INDEX IF NOT EXISTS idx_case_reporter ON case_events(reporter_chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_case_site_status ON case_events(site_id, status);
+
+CREATE TABLE IF NOT EXISTS discipline_events (
+    id SERIAL PRIMARY KEY,
+    subject_chat_id TEXT NOT NULL,
+    filed_by TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'filed'
+        CHECK (status IN ('filed', 'under_review', 'decided', 'appealed')),
+    reviewed_by TEXT,
+    decided_by TEXT,
+    decision TEXT,
+    decision_note TEXT,
+    appeal_note TEXT,
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_discipline_subject ON discipline_events(subject_chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_discipline_site_status ON discipline_events(site_id, status);
 """
 
 
