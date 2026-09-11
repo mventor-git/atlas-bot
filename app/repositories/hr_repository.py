@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 _COLUMNS = (
     "requester_chat_id, requester_name, request_type, amount, reason,"
     " site_id, trip_date, report_ref, receipt_path, deduction_month,"
+    " start_date, end_date, hours,"
     " status, assigned_to, delegated, note, signatures, pdf_path,"
     " created_at, updated_at"
 )
@@ -32,7 +33,7 @@ class HRRepository(BaseRepository[HRRequest]):
         entity.site_id = site
         cursor = self._db.execute(
             f"""INSERT INTO hr_requests ({_COLUMNS})
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entity.requester_chat_id,
                 entity.requester_name,
@@ -44,6 +45,9 @@ class HRRepository(BaseRepository[HRRequest]):
                 entity.report_ref,
                 entity.receipt_path,
                 entity.deduction_month,
+                entity.start_date,
+                entity.end_date,
+                entity.hours,
                 entity.status,
                 entity.assigned_to,
                 1 if entity.delegated else 0,
@@ -172,6 +176,9 @@ class HRRepository(BaseRepository[HRRequest]):
             report_ref=row["report_ref"],
             receipt_path=row["receipt_path"],
             deduction_month=row["deduction_month"],
+            start_date=row["start_date"] if "start_date" in row.keys() else None,
+            end_date=row["end_date"] if "end_date" in row.keys() else None,
+            hours=row["hours"] if "hours" in row.keys() else None,
             status=row["status"],
             assigned_to=row["assigned_to"],
             delegated=bool(row["delegated"]),

@@ -99,7 +99,7 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
     }),
     "viewer": frozenset({
         "view_own_attendance", "view_own_payroll", "view_own_requests",
-        "submit_hr_request",
+        "submit_hr_request", "submit_leave", "submit_mission", "request_overtime",
     }),
     "pending": frozenset(),
     "rejected": frozenset(),

@@ -232,9 +232,11 @@ async def handle_hr_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     flow = context.user_data.get("hr_flow", {})
     if state == "awaiting_hr_report_ref":
         context.user_data["state"] = "awaiting_hr_receipt"
-        await update.message.reply_text("Send the receipt photo, or /skip.")
+        await update.message.reply_text("Send the receipt photo, or /hr_skip.")
     elif state == "awaiting_hr_receipt":
         await _create_request(update, context)
+    elif state == "awaiting_lmo_reason" and flow.get("type") == "overtime":
+        await handle_lmo_skip(update, context)
     else:
         await update.message.reply_text("Nothing to skip.")
 
@@ -461,6 +463,9 @@ def get_registration_handlers() -> list:
         CommandHandler("hr_setsite", set_site_command),
         CommandHandler("hr_pay", pay_command),
         CommandHandler("hr_deduct", deduct_command),
+        CommandHandler("leave", leave_command),
+        CommandHandler("mission", mission_command),
+        CommandHandler("overtime", overtime_command),
         CallbackQueryHandler(handle_hr_callback, pattern="^hr_"),
         MessageHandler(filters.PHOTO, handle_hr_receipt),
     ]
@@ -595,6 +600,136 @@ async def deduct_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _notify(context, req.requester_chat_id,
                       f"Payroll deduction recorded for HR request #{req.id}: "
                       f"{event.amount:g} ({event.period}).")
+
+
+# --- Leave / mission / overtime conversational flows (011) ---
+
+async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start a leave request: reason -> start -> end."""
+    chat_id, _ = _me(update)
+    if not _auth(context).has_capability(chat_id, "submit_leave"):
+        await update.message.reply_text("Leave requests need an approved account.")
+        return
+    context.user_data["hr_flow"] = {"type": "leave"}
+    context.user_data["state"] = "awaiting_lmo_reason"
+    await update.message.reply_text("Leave reason?")
+
+
+async def mission_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start a mission request: purpose -> start -> end."""
+    chat_id, _ = _me(update)
+    if not _auth(context).has_capability(chat_id, "submit_mission"):
+        await update.message.reply_text("Mission requests need an approved account.")
+        return
+    context.user_data["hr_flow"] = {"type": "mission"}
+    context.user_data["state"] = "awaiting_lmo_reason"
+    await update.message.reply_text("Mission purpose?")
+
+
+async def overtime_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start an overtime request: date -> hours -> reason."""
+    chat_id, _ = _me(update)
+    if not _auth(context).has_capability(chat_id, "request_overtime"):
+        await update.message.reply_text("Overtime requests need an approved account.")
+        return
+    context.user_data["hr_flow"] = {"type": "overtime"}
+    context.user_data["state"] = "awaiting_lmo_date"
+    await update.message.reply_text("Overtime date? (YYYY-MM-DD)")
+
+
+async def handle_lmo_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    reason = (update.message.text or "").strip()
+    if not reason:
+        await update.message.reply_text("Send the reason as text.")
+        return
+    flow = context.user_data["hr_flow"]
+    flow["reason"] = reason
+    if flow["type"] == "overtime":
+        await _create_lmo_request(update, context)
+    else:
+        context.user_data["state"] = "awaiting_lmo_start"
+        await update.message.reply_text("Start date? (YYYY-MM-DD)")
+
+
+async def handle_lmo_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (update.message.text or "").strip()
+    if len(text) != 10 or text[4] != "-" or text[7] != "-":
+        await update.message.reply_text("Send the start date as YYYY-MM-DD.")
+        return
+    context.user_data["hr_flow"]["start"] = text
+    context.user_data["state"] = "awaiting_lmo_end"
+    await update.message.reply_text("End date? (YYYY-MM-DD, same as start for one day)")
+
+
+async def handle_lmo_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (update.message.text or "").strip()
+    if len(text) != 10 or text[4] != "-" or text[7] != "-":
+        await update.message.reply_text("Send the end date as YYYY-MM-DD.")
+        return
+    context.user_data["hr_flow"]["end"] = text
+    await _create_lmo_request(update, context)
+
+
+async def handle_lmo_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (update.message.text or "").strip()
+    if len(text) != 10 or text[4] != "-" or text[7] != "-":
+        await update.message.reply_text("Send the date as YYYY-MM-DD.")
+        return
+    context.user_data["hr_flow"]["date"] = text
+    context.user_data["state"] = "awaiting_lmo_hours"
+    await update.message.reply_text("How many hours? (max 24)")
+
+
+async def handle_lmo_hours(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        hours = float((update.message.text or "").strip())
+        if hours <= 0 or hours > 24:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Send hours as a number within (0, 24].")
+        return
+    context.user_data["hr_flow"]["hours"] = hours
+    context.user_data["state"] = "awaiting_lmo_reason"
+    await update.message.reply_text("Reason? (or /hr_skip)")
+
+
+async def handle_lmo_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    flow = context.user_data.get("hr_flow", {})
+    if flow.get("type") == "overtime" and context.user_data.get("state") == "awaiting_lmo_reason":
+        flow["reason"] = "overtime"
+        await _create_lmo_request(update, context)
+    else:
+        await update.message.reply_text("Nothing to skip.")
+
+
+async def _create_lmo_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id, name = _me(update)
+    flow = context.user_data.get("hr_flow", {})
+    service = _hr(context)
+    kind = flow.get("type")
+    try:
+        if kind == "leave":
+            req = service.request_leave(
+                chat_id, name, flow["reason"], flow["start"], flow["end"])
+        elif kind == "mission":
+            req = service.request_mission(
+                chat_id, name, flow["reason"], flow["start"], flow["end"])
+        elif kind == "overtime":
+            req = service.request_overtime(
+                chat_id, name, flow.get("date", ""), flow["hours"],
+                flow.get("reason", "overtime"))
+        else:
+            await update.message.reply_text("Unknown request type - start over.")
+            return
+    except DatabaseError as e:
+        await update.message.reply_text(f"Could not file the request: {e}")
+        return
+    context.user_data.pop("hr_flow", None)
+    context.user_data.pop("state", None)
+    await update.message.reply_text(
+        f"Filed {kind} #{req.id}:\n{_render(req)}\n\nStatus: pending PM confirmation.",
+        parse_mode="Markdown",
+    )
 
 
 def _ensure_report_pdf(context: ContextTypes.DEFAULT_TYPE, date_str: str, site_id: str):
