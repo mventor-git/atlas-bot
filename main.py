@@ -56,6 +56,8 @@ from app.services.case_service import CaseService
 from app.repositories.case_repository import CaseRepository
 from app.services.discipline_service import DisciplineService
 from app.repositories.discipline_repository import DisciplineRepository
+from app.services.payroll_service import PayrollService
+from app.repositories.payroll_repository import PayrollRepository
 from app.services.attendance_service import AttendanceService
 from app.repositories.attendance_repository import AttendanceRepository
 from app.services.audit_service import AuditService
@@ -288,6 +290,7 @@ def main() -> None:
         migrated = auth_service.migrate_memberships()
         if migrated:
             logger.info("Migrated %d legacy site memberships.", migrated)
+        payroll_service = PayrollService(PayrollRepository(db_manager), user_repo)
 
         app = create_bot_app(
             report_repository=report_repo_with_events,
@@ -312,6 +315,7 @@ def main() -> None:
             attendance_service=attendance_service,
             case_service=case_service,
             discipline_service=discipline_service,
+            payroll_service=payroll_service,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop

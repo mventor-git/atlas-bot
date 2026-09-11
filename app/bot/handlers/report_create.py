@@ -590,7 +590,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                    "awaiting_lmo_hours", "awaiting_att_note",
                    "awaiting_case_summary", "awaiting_case_note",
                    "awaiting_case_appeal", "awaiting_disc_note",
-                   "awaiting_disc_appeal"):
+                   "awaiting_disc_appeal", "awaiting_salary_csv"):
         # Forward to HR handlers (imported here to avoid circular dependency)
         from app.bot.handlers import hr as hr_handlers
 
@@ -642,6 +642,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             from app.bot.handlers import discipline as disc_handlers
 
             await disc_handlers.handle_disc_appeal(update, context)
+        elif state == "awaiting_salary_csv":
+            from app.bot.handlers import payroll as payroll_handlers
+
+            await payroll_handlers.handle_salary_csv(update, context)
     elif state in ("awaiting_finalize_confirmation", "awaiting_lock_confirmation"):
         await update.message.reply_text(
             "Please use the confirmation buttons above, or type /cancel to go back.",
