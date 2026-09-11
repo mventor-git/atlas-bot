@@ -108,6 +108,37 @@ class TestDailyFill:
             TemplateFiller(bad).fill(_report(1), str(temp_dir / "x.ods"))
 
 
+class TestSplitRender:
+    """023: craftsmen+helpers print in the detailed-number column (G)."""
+
+    def _row_for(self, grid, contractor):
+        (row,) = [r for r in grid if len(r) > 2 and r[2] == contractor]
+        return row
+
+    def test_split_plus_derived_and_manual_wins(self, config, temp_dir: Path):
+        rep = Report(
+            date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
+            items=[
+                ReportItem(contractor="SplitCo", workers=10,
+                           craftsmen=7, helpers=3),
+                ReportItem(contractor="DerivedCo", workers=10, craftsmen=10),
+                ReportItem(contractor="ManualCo", workers=3, craftsmen=1,
+                           helpers=2, details="10 Mason, 3 Helper"),
+            ])
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "s.ods")))
+        grid = _texts(out)
+        assert self._row_for(grid, "SplitCo")[6] == "7+3"
+        assert self._row_for(grid, "DerivedCo")[6] == "10+0"
+        assert self._row_for(grid, "ManualCo")[6] == "10 Mason, 3 Helper"
+
+    def test_legacy_item_prints_empty(self, config, temp_dir: Path):
+        rep = Report(
+            date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
+            items=[ReportItem(contractor="OldCo", workers=4)])
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "l.ods")))
+        assert self._row_for(_texts(out), "OldCo")[6] == ""
+
+
 class TestContractorReport:
     def _entries(self):
         return [

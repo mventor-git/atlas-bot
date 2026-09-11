@@ -246,6 +246,13 @@ class TestValidateItem:
         warnings = svc.validate_item(item)
         assert not any(w.field == "details" for w in warnings)
 
+    def test_split_counts_as_details(self):
+        svc = make_service()
+        item = ReportItem(contractor="Civil Co", workers=10,
+                          craftsmen=7, helpers=3)
+        warnings = svc.validate_item(item)
+        assert not any(w.field == "details" for w in warnings)
+
     def test_workers_none_does_not_trigger_count_warnings(self):
         svc = make_service()
         item = make_item(workers=None)
