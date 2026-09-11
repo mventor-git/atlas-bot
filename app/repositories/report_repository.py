@@ -463,6 +463,8 @@ class ReportRepository(BaseRepository[Report]):
                 type=row["type"],
                 zone=row["zone"],
                 workers=row["workers"],
+                craftsmen=row["craftsmen"] if "craftsmen" in row.keys() else None,
+                helpers=row["helpers"] if "helpers" in row.keys() else None,
                 details=row["details"],
                 contractor_code=row["contractor_code"] if "contractor_code" in row.keys() else None,
             )
@@ -481,8 +483,8 @@ class ReportRepository(BaseRepository[Report]):
         """
         for item in items:
             cursor = self._db.execute(
-                """INSERT INTO report_items (report_id, contractor, type, zone, workers, details, contractor_code)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO report_items (report_id, contractor, type, zone, workers, details, contractor_code, craftsmen, helpers)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     report_id,
                     item.contractor,
@@ -491,6 +493,8 @@ class ReportRepository(BaseRepository[Report]):
                     item.workers,
                     item.details,
                     item.contractor_code,
+                    item.craftsmen,
+                    item.helpers,
                 ),
             )
             item.id = cursor.lastrowid

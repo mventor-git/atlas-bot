@@ -362,7 +362,7 @@ class TestFlow2_CreateReportButton:
 
     @pytest.mark.asyncio
     async def test_2d_worker_count_sets_zone_state(self, mock_contractor_search):
-        """Sending worker number -> state = awaiting_zone."""
+        """Sending worker number -> state = awaiting_craftsmen (022 split step)."""
         from app.bot.handlers.report_create import handle_worker_count
 
         update = MockHelpers.mock_update(message_text="10")
@@ -378,7 +378,7 @@ class TestFlow2_CreateReportButton:
         await handle_worker_count(update, context)
 
         assert context.user_data["current_workers"] == 10
-        assert context.user_data["state"] == "awaiting_zone"
+        assert context.user_data["state"] == "awaiting_craftsmen"
         update.message.reply_text.assert_called_once()
 
     @pytest.mark.asyncio

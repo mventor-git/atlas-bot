@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS report_items (
     workers INTEGER,
     details TEXT,
     contractor_code TEXT,
+    craftsmen INTEGER,
+    helpers INTEGER,
     FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
 );
 
@@ -378,6 +380,8 @@ CREATE TABLE IF NOT EXISTS report_items (
     workers INTEGER,
     details TEXT,
     contractor_code TEXT,
+    craftsmen INTEGER,
+    helpers INTEGER,
     FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
 );
 
@@ -714,6 +718,8 @@ class DatabaseManager:
         self._ensure_hr_requests_v2()
         # Salary column on pre-existing users tables (idempotent).
         self._ensure_users_salary()
+        # Craftsman/helper split on pre-existing report_items (idempotent).
+        self._ensure_report_items_split()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
         self._ensure_site_uniques()
 
@@ -806,6 +812,16 @@ class DatabaseManager:
         self.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL")
         self.commit()
         logger.info("Added monthly_salary to users.")
+
+    def _ensure_report_items_split(self) -> None:
+        """Add report_items.craftsmen/helpers on old DBs (idempotent)."""
+        if not self.table_exists("report_items"):
+            return
+        for column in ("craftsmen", "helpers"):
+            if not self.column_exists("report_items", column):
+                self.execute(f"ALTER TABLE report_items ADD COLUMN {column} INTEGER")
+                self.commit()
+                logger.info("Added %s to report_items.", column)
 
     def ensure_site_columns(self) -> None:
         """Add tenant site_id columns to existing tables (idempotent).

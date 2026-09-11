@@ -97,6 +97,12 @@ class ReportItem:
     workers: Optional[int] = None
     """Number of workers for this contractor."""
 
+    craftsmen: Optional[int] = None
+    """Craftsmen count (022 split; None = unknown, helpers = workers - craftsmen)."""
+
+    helpers: Optional[int] = None
+    """Helpers count, derived at entry (None when split skipped)."""
+
     details: Optional[str] = None
     """Detailed worker breakdown (e.g., '10 Mason, 3 Helper')."""
 

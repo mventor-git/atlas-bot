@@ -1135,7 +1135,7 @@ class TestCallbackRouting:
         await handle_worker_count(update, context)
 
         assert context.user_data["current_workers"] == 10
-        assert context.user_data["state"] == "awaiting_zone"
+        assert context.user_data["state"] == "awaiting_craftsmen"
 
     @pytest.mark.asyncio
     async def test_handle_worker_count_invalid(self):

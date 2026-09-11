@@ -303,7 +303,7 @@ class TestFlow19CancelBackSkipNavigation:
 
     @pytest.mark.asyncio
     async def test_19c_back_from_awaiting_zone(self):
-        """/back from awaiting_zone -> state changes to awaiting_worker_count."""
+        """/back from awaiting_zone -> state changes to awaiting_craftsmen."""
         from app.bot.handlers.report_create import back_command
 
         update = MockHelpers.mock_update(message_text="/back")
@@ -317,7 +317,7 @@ class TestFlow19CancelBackSkipNavigation:
         with patch("app.utils.business_hours.is_business_hours", return_value=True):
             await back_command(update, context)
 
-        assert context.user_data["state"] == "awaiting_worker_count"
+        assert context.user_data["state"] == "awaiting_craftsmen"
 
     @pytest.mark.asyncio
     async def test_19d_skip_on_details(self):
