@@ -23,8 +23,20 @@ DATE_MARKERS = ("Date:", "التاريخ")
 HEADER_MARKERS = ("Contractor", "اسم المقاول")
 TOTALS_MARKERS = ("Total:", "الإجمالي")
 
-# Logical columns B..G (0-based element index after repeat expansion)
-COL_SERIAL, COL_CONTRACTOR, COL_TYPE, COL_ZONE, COL_WORKERS, COL_DETAILS = 1, 2, 3, 4, 5, 6
+# 024: fields resolved by header text so owners may insert columns anywhere.
+# First header containing any alias wins; EN + common AR word stems.
+# ponytail: if an owner label matches nothing, they rename the header or we
+# add an alias here (upgrade: config table.header_aliases if that recurs).
+FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "contractor": ("contractor", "المقاول"),
+    "type": ("type", "البند"),
+    "zone": ("zone", "مكان"),
+    "workers": ("worker", "العمال"),
+    "craftsmen": ("craftsm", "حرفي"),  # stem: matches singular + plural
+    "helpers": ("helper", "مساعد"),
+    "details": ("detail", "التفصيلي"),
+}
+_REQUIRED = ("contractor", "workers")
 
 
 class LibreFillError(LaborReportError):
@@ -96,8 +108,8 @@ class TemplateFiller:
             table = ots.first_table(doc)
             self._fill_day_date(table, report)
             if items:
-                total = self._fill_items(table, items)
-                self._fill_totals(table, total)
+                totals, cols = self._fill_items(table, items)
+                self._fill_totals(table, totals, cols)
             return ots.save(doc, output_path)
         except (FileNotFoundError, LibreFillError):
             raise
@@ -133,32 +145,90 @@ class TemplateFiller:
         except ValueError:
             logger.debug("Date marker not in template, skipping")
 
-    def _fill_items(self, table, items: list) -> int:
+    @staticmethod
+    def _locate_columns(header_texts: list[str]) -> dict[str, int | None]:
+        """024: resolve fields to logical column indexes by header text.
+
+        Owners may insert Craftsmen/Helpers columns anywhere; first header
+        containing an alias wins. Missing required labels or a header that
+        matches two fields fails loudly - a wrong layout must never print.
+        Optional labels (type, zone, split columns, details) simply miss.
+        """
+        fold = [t.casefold() for t in header_texts]
+        cols: dict[str, int | None] = {}
+        for field, aliases in FIELD_ALIASES.items():
+            hits = [i for i, t in enumerate(fold)
+                    if any(a in t for a in aliases)]
+            cols[field] = hits[0] if hits else None
+        missing = [f for f in _REQUIRED if cols.get(f) is None]
+        if missing:
+            raise LibreFillError(
+                f"Template headers missing required column(s): "
+                f"{', '.join(missing)}")
+        taken = [i for i in cols.values() if i is not None]
+        if len(taken) != len(set(taken)):
+            raise LibreFillError(
+                "Template headers are ambiguous (one label matches two fields)")
+        return cols
+
+    def _fill_items(self, table, items: list) -> tuple[dict, dict]:
+        """Write item rows; returns (totals, resolved columns)."""
         header_idx = ots.find_first(table, HEADER_MARKERS)
         totals_idx = ots.find_first(table, TOTALS_MARKERS, start=header_idx + 1)
+        cols = self._locate_columns(
+            [ots.cell_text(c) for c in
+             ots.logical_cells(table.getElementsByType(ots.TableRow)[header_idx])])
         slots = list(range(header_idx + 1, totals_idx))
         while len(slots) < len(items):
             new_idx = ots.clone_row_after(table, slots[-1])
             slots.append(new_idx)
-        total = 0
+        totals = {"workers": 0, "craftsmen": None, "helpers": None}
+        dedicated = cols["craftsmen"] is not None or cols["helpers"] is not None
+        serial_idx = cols["contractor"] - 1 \
+            if cols["contractor"] >= 1 else None
         for n, item in enumerate(items):
             cells = ots.logical_cells(
                 table.getElementsByType(ots.TableRow)[slots[n]]
             )
             workers = item.workers or 0
-            total += workers
-            ots.set_cell_text(cells[COL_SERIAL], str(n + 1))
-            ots.set_cell_text(cells[COL_CONTRACTOR], item.contractor or "")
-            ots.set_cell_text(cells[COL_TYPE], item.type or "")
-            ots.set_cell_text(cells[COL_ZONE], item.zone or "")
-            ots.set_cell_text(cells[COL_WORKERS], str(workers))
-            ots.set_cell_text(cells[COL_DETAILS], details_text(item))
-        return total
+            totals["workers"] += workers
+            craftsmen, helpers = item.craftsmen, item.helpers
+            if craftsmen is not None:
+                totals["craftsmen"] = (totals["craftsmen"] or 0) + craftsmen
+                if helpers is None:
+                    helpers = workers - craftsmen
+            if helpers is not None:
+                totals["helpers"] = (totals["helpers"] or 0) + helpers
 
-    def _fill_totals(self, table, total: int) -> None:
+            def write(field: str, text: str) -> None:
+                idx = cols.get(field)
+                if idx is not None:
+                    ots.set_cell_text(cells[idx], text)
+
+            if serial_idx is not None:
+                ots.set_cell_text(cells[serial_idx], str(n + 1))
+            write("contractor", item.contractor or "")
+            write("type", item.type or "")
+            write("zone", item.zone or "")
+            write("workers", str(workers))
+            write("craftsmen", "" if craftsmen is None else str(craftsmen))
+            write("helpers", "" if helpers is None else str(helpers))
+            if dedicated:
+                manual = item.details.strip() if item.details else ""
+                write("details", manual)
+            else:
+                write("details", details_text(item))
+        return totals, cols
+
+    def _fill_totals(self, table, totals: dict, cols: dict) -> None:
         header_idx = ots.find_first(table, HEADER_MARKERS)
         totals_idx = ots.find_first(table, TOTALS_MARKERS, start=header_idx + 1)
         cells = ots.logical_cells(
             table.getElementsByType(ots.TableRow)[totals_idx]
         )
-        ots.set_cell_text(cells[COL_WORKERS], str(total))
+        for field in ("workers", "craftsmen", "helpers"):
+            idx = cols.get(field)
+            if idx is not None:
+                value = totals[field]
+                # Unknown splits stay blank; totals never fabricate zeros.
+                ots.set_cell_text(cells[idx], "" if value is None else str(value))
