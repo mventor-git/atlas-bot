@@ -58,6 +58,7 @@ def create_bot_app(
     user_repository=None,
     attendance_service=None,
     case_service=None,
+    discipline_service=None,
 ) -> Application:
     """Create and configure the Telegram bot application.
 
@@ -97,6 +98,7 @@ def create_bot_app(
     app.bot_data["user_repository"] = user_repository
     app.bot_data["attendance_service"] = attendance_service
     app.bot_data["case_service"] = case_service
+    app.bot_data["discipline_service"] = discipline_service
     app.bot_data["app_config"] = app_config
 
     logger.info(
@@ -120,6 +122,7 @@ def _register_handlers(app: Application) -> None:
     from app.bot.handlers.comparison import get_registration_handlers as get_comparison_handlers
     from app.bot.handlers.hr import get_registration_handlers as get_hr_handlers
     from app.bot.handlers.cases import get_registration_handlers as get_case_handlers
+    from app.bot.handlers.discipline import get_registration_handlers as get_discipline_handlers
     from app.bot.handlers.attendance import get_registration_handlers as get_attendance_handlers
 
     handlers = []
@@ -129,6 +132,7 @@ def _register_handlers(app: Application) -> None:
     handlers.extend(get_comparison_handlers())
     handlers.extend(get_hr_handlers())
     handlers.extend(get_case_handlers())
+    handlers.extend(get_discipline_handlers())
     handlers.extend(get_attendance_handlers())
     handlers.extend(get_admin_handlers())
     handlers.extend(get_admin_users_handlers())
