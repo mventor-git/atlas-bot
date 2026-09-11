@@ -19,6 +19,7 @@ COPY app/ ./app/
 COPY config/ ./config/
 COPY templates/ ./templates/
 COPY scripts/ ./scripts/
+COPY database/ ./database/
 COPY main.py ./
 
 # exports/ logs/ database/ are mounted volumes (see compose), never baked in
