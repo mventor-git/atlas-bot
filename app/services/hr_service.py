@@ -12,8 +12,15 @@ from datetime import datetime
 from typing import Optional
 
 from app.database import driver
-from app.models.hr import HRRequest, HRRequestStatus, HRRequestType
+from app.models.hr import (
+    DeductionEvent,
+    HRRequest,
+    HRRequestStatus,
+    HRRequestType,
+    PayoutEvent,
+)
 from app.repositories.hr_repository import HRRepository
+from app.repositories.money_repository import MoneyRepository
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
@@ -37,8 +44,10 @@ def _sign(request: HRRequest, role: str, chat_id: str, name: str,
 class HRService:
     """Approval-chain engine for HR requests."""
 
-    def __init__(self, hr_repo: HRRepository) -> None:
+    def __init__(self, hr_repo: HRRepository,
+                 money_repo: MoneyRepository | None = None) -> None:
         self._repo = hr_repo
+        self._money = money_repo
 
     # --- Request ---
 
@@ -150,6 +159,122 @@ class HRService:
             raise DatabaseError("PDF attaches only to approved requests.")
         req.pdf_path = pdf_path
         return self._repo.save(req)
+
+    # --- Money events (009 ledger) ---
+
+    def _money_or_raise(self) -> MoneyRepository:
+        if self._money is None:
+            raise DatabaseError("Money ledger not wired for this service.")
+        return self._money
+
+    def record_payout(
+        self, request_id: int, amount: float, payout_date: str,
+        confirmed_by: str, reference: str = "", note: str = "",
+        site_id: str | None = None,
+    ) -> PayoutEvent:
+        """Confirm a payout event (approved requests only)."""
+        req = self._get(request_id, site_id)
+        if req.status != HRRequestStatus.APPROVED:
+            raise DatabaseError("Payouts record only on approved requests.")
+        self._check_amount(amount)
+        return self._money_or_raise().record_payout(PayoutEvent(
+            request_id=req.id, amount=float(amount),
+            payout_date=(payout_date or "").strip(),
+            confirmed_by=confirmed_by, reference=reference.strip(),
+            note=note.strip(), site_id=req.site_id,
+        ))
+
+    def record_deduction(
+        self, request_id: int, amount: float, period: str,
+        confirmed_by: str, deduction_date: str = "",
+        reference: str = "", note: str = "",
+        site_id: str | None = None,
+    ) -> DeductionEvent:
+        """Confirm a payroll-deduction event (advance requests only)."""
+        req = self._get(request_id, site_id)
+        if req.status != HRRequestStatus.APPROVED:
+            raise DatabaseError("Deductions record only on approved requests.")
+        if req.request_type != HRRequestType.ADVANCE:
+            raise DatabaseError("Only advances carry payroll deductions.")
+        if not _MONTH_RE.match(period or ""):
+            raise DatabaseError("Deduction period must be YYYY-MM.")
+        self._check_amount(amount)
+        return self._money_or_raise().record_deduction(DeductionEvent(
+            request_id=req.id, amount=float(amount), period=period,
+            deduction_date=(deduction_date or "").strip(),
+            confirmed_by=confirmed_by, reference=reference.strip(),
+            note=note.strip(), site_id=req.site_id,
+        ))
+
+    def financial_status(self, request_id: int,
+                         site_id: str | None = None) -> dict:
+        """Derived financial state from the event ledger (never stored)."""
+        req = self._get(request_id, site_id)
+        money = self._money_or_raise()
+        paid = money.paid_total(req.id, site_id=req.site_id)
+        deducted = money.deducted_total(req.id, site_id=req.site_id)
+        required = float(req.amount or 0)
+        disputed = self._is_disputed(req)
+        if req.request_type == HRRequestType.TRANSPORT:
+            state = "disputed" if disputed else (
+                "closed" if paid >= required and required > 0 else (
+                    "partially_paid" if paid > 0 else "pending_payout"))
+            return {"state": state, "paid": paid, "required": required,
+                    "disputed": disputed}
+        state = "disputed" if disputed else "pending_payout"
+        if paid >= required and required > 0:
+            state = "paid"
+        elif paid > 0:
+            state = "partially_paid"
+        deduction_state = "pending_deduction"
+        if deducted >= required and required > 0:
+            deduction_state = "fully_deducted"
+        elif deducted > 0:
+            deduction_state = "partially_deducted"
+        if not disputed and state == "paid" and deduction_state == "fully_deducted":
+            state = "closed"
+        return {"state": state, "deduction_state": deduction_state,
+                "paid": paid, "deducted": deducted,
+                "required": required, "disputed": disputed}
+
+    def try_close(self, request_id: int,
+                  site_id: str | None = None) -> bool:
+        """Close a fully reconciled request (audit signature, no flags)."""
+        req = self._get(request_id, site_id)
+        if self.financial_status(req.id, site_id=req.site_id)["state"] != "closed":
+            return False
+        _sign(req, "system", "system", "Atlas-Bot", "closed")
+        self._repo.save(req)
+        return True
+
+    def dispute(self, request_id: int, chat_id: str, name: str,
+                note: str, site_id: str | None = None) -> HRRequest:
+        """Flag a dispute (explicit, audited; resolution clears it)."""
+        req = self._get(request_id, site_id)
+        if not (note or "").strip():
+            raise DatabaseError("Dispute needs a note.")
+        _sign(req, "dispute", chat_id, name, "disputed", note=note)
+        return self._repo.save(req)
+
+    def resolve_dispute(self, request_id: int, chat_id: str, name: str,
+                        role: str, note: str = "",
+                        site_id: str | None = None) -> HRRequest:
+        """Clear a dispute with an authorized resolution entry."""
+        req = self._get(request_id, site_id)
+        if not self._is_disputed(req):
+            raise DatabaseError("No open dispute on this request.")
+        _sign(req, role, chat_id, name, "dispute-resolved", note=note)
+        return self._repo.save(req)
+
+    @staticmethod
+    def _is_disputed(req: HRRequest) -> bool:
+        open_dispute = False
+        for sig in req.signatures or []:
+            if sig.get("decision") == "disputed":
+                open_dispute = True
+            elif sig.get("decision") == "dispute-resolved":
+                open_dispute = False
+        return open_dispute
 
     # --- Visibility ---
 

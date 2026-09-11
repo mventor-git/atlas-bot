@@ -459,6 +459,8 @@ def get_registration_handlers() -> list:
         CommandHandler("hr_sites", sites_command),
         CommandHandler("hr_print_all", print_all_command),
         CommandHandler("hr_setsite", set_site_command),
+        CommandHandler("hr_pay", pay_command),
+        CommandHandler("hr_deduct", deduct_command),
         CallbackQueryHandler(handle_hr_callback, pattern="^hr_"),
         MessageHandler(filters.PHOTO, handle_hr_receipt),
     ]
@@ -534,6 +536,65 @@ async def set_site_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"User {chat_id} not found.")
         return
     await update.message.reply_text(f"User {chat_id} assigned to site {site_id}.")
+
+
+async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirm a payout: /hr_pay <request_id> <amount> <YYYY-MM-DD> [reference]."""
+    chat_id, name = _me(update)
+    if not _auth(context).has_capability(chat_id, "confirm_payout"):
+        await update.message.reply_text("Payout confirmation needs a finance/HR grant.")
+        return
+    parts = (update.message.text or "").split(maxsplit=4)
+    if len(parts) < 4:
+        await update.message.reply_text("Usage: /hr_pay <request_id> <amount> <YYYY-MM-DD> [reference]")
+        return
+    _, req_id, amount, payout_date = parts[:4]
+    reference = parts[4] if len(parts) > 4 else ""
+    service = _hr(context)
+    try:
+        event = service.record_payout(int(req_id), float(amount), payout_date,
+                                      chat_id, reference=reference)
+    except (DatabaseError, ValueError) as e:
+        await update.message.reply_text(f"Could not record payout: {e}")
+        return
+    status = service.financial_status(event.request_id)
+    await update.message.reply_text(
+        f"Payout recorded: {event.amount:g} on {event.payout_date} "
+        f"(total paid {status['paid']:g}). State: {status['state']}.")
+    req = service._repo.get_by_id(event.request_id)
+    if req is not None:
+        await _notify(context, req.requester_chat_id,
+                      f"Payout recorded for HR request #{req.id}: {event.amount:g}.")
+
+
+async def deduct_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirm a payroll deduction: /hr_deduct <request_id> <amount> <YYYY-MM> [reference]."""
+    chat_id, name = _me(update)
+    if not _auth(context).has_capability(chat_id, "confirm_payroll_deduction"):
+        await update.message.reply_text("Deduction confirmation needs a payroll grant.")
+        return
+    parts = (update.message.text or "").split(maxsplit=4)
+    if len(parts) < 4:
+        await update.message.reply_text("Usage: /hr_deduct <request_id> <amount> <YYYY-MM> [reference]")
+        return
+    _, req_id, amount, period = parts[:4]
+    reference = parts[4] if len(parts) > 4 else ""
+    service = _hr(context)
+    try:
+        event = service.record_deduction(int(req_id), float(amount), period,
+                                         chat_id, reference=reference)
+    except (DatabaseError, ValueError) as e:
+        await update.message.reply_text(f"Could not record deduction: {e}")
+        return
+    status = service.financial_status(event.request_id)
+    await update.message.reply_text(
+        f"Deduction recorded: {event.amount:g} for {event.period} "
+        f"(total deducted {status['deducted']:g}). State: {status['deduction_state']}.")
+    req = service._repo.get_by_id(event.request_id)
+    if req is not None:
+        await _notify(context, req.requester_chat_id,
+                      f"Payroll deduction recorded for HR request #{req.id}: "
+                      f"{event.amount:g} ({event.period}).")
 
 
 def _ensure_report_pdf(context: ContextTypes.DEFAULT_TYPE, date_str: str, site_id: str):
