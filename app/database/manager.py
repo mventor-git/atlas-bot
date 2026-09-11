@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     first_name TEXT,
     site_id TEXT NOT NULL DEFAULT 'default',
+    monthly_salary REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     approved_by TEXT,
     approved_at TEXT,
@@ -313,6 +314,36 @@ CREATE TABLE IF NOT EXISTS discipline_events (
 
 CREATE INDEX IF NOT EXISTS idx_discipline_subject ON discipline_events(subject_chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_discipline_site_status ON discipline_events(site_id, status);
+
+-- Payroll runs + lines (020 P5; draft editable, export locks)
+CREATE TABLE IF NOT EXISTS payroll_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    period TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'exported')),
+    ot_multiplier REAL NOT NULL DEFAULT 1.5,
+    standard_hours REAL NOT NULL DEFAULT 240.0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    exported_at TEXT,
+    UNIQUE (site_id, period)
+);
+
+CREATE TABLE IF NOT EXISTS payroll_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES payroll_runs(id),
+    chat_id TEXT NOT NULL,
+    base_pay REAL NOT NULL,
+    ot_hours REAL NOT NULL DEFAULT 0,
+    ot_amount REAL NOT NULL DEFAULT 0,
+    advances REAL NOT NULL DEFAULT 0,
+    deductions REAL NOT NULL DEFAULT 0,
+    net REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
+CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -425,6 +456,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     first_name TEXT,
     site_id TEXT NOT NULL DEFAULT 'default',
+    monthly_salary REAL,
     created_at TEXT NOT NULL DEFAULT (now()),
     approved_by TEXT,
     approved_at TEXT,
@@ -590,6 +622,35 @@ CREATE TABLE IF NOT EXISTS discipline_events (
 
 CREATE INDEX IF NOT EXISTS idx_discipline_subject ON discipline_events(subject_chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_discipline_site_status ON discipline_events(site_id, status);
+
+CREATE TABLE IF NOT EXISTS payroll_runs (
+    id SERIAL PRIMARY KEY,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    period TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'exported')),
+    ot_multiplier REAL NOT NULL DEFAULT 1.5,
+    standard_hours REAL NOT NULL DEFAULT 240.0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    exported_at TEXT,
+    UNIQUE (site_id, period)
+);
+
+CREATE TABLE IF NOT EXISTS payroll_lines (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES payroll_runs(id),
+    chat_id TEXT NOT NULL,
+    base_pay REAL NOT NULL,
+    ot_hours REAL NOT NULL DEFAULT 0,
+    ot_amount REAL NOT NULL DEFAULT 0,
+    advances REAL NOT NULL DEFAULT 0,
+    deductions REAL NOT NULL DEFAULT 0,
+    net REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
+CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
 """
 
 
@@ -651,6 +712,8 @@ class DatabaseManager:
         self.ensure_site_columns()
         # HR table widening for leave/mission/overtime (idempotent).
         self._ensure_hr_requests_v2()
+        # Salary column on pre-existing users tables (idempotent).
+        self._ensure_users_salary()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
         self._ensure_site_uniques()
 
@@ -733,6 +796,16 @@ class DatabaseManager:
             if stmt:
                 cursor.execute(driver.translate(stmt, self._pg))
         conn.commit()
+
+    def _ensure_users_salary(self) -> None:
+        """Add users.monthly_salary on old DBs (idempotent, both backends)."""
+        if not self.table_exists("users"):
+            return
+        if self.column_exists("users", "monthly_salary"):
+            return
+        self.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL")
+        self.commit()
+        logger.info("Added monthly_salary to users.")
 
     def ensure_site_columns(self) -> None:
         """Add tenant site_id columns to existing tables (idempotent).
