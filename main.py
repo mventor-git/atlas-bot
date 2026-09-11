@@ -52,6 +52,8 @@ from app.services.arabic_date_service import ArabicDateService
 from app.services.validation_service import ValidationService
 from app.services.add_contractor_service import AddContractorService
 from app.services.hr_service import HRService
+from app.services.attendance_service import AttendanceService
+from app.repositories.attendance_repository import AttendanceRepository
 from app.services.audit_service import AuditService
 from app.libre.filler import TemplateFiller
 from app.libre.pdf import PDFGenerator
@@ -258,6 +260,7 @@ def main() -> None:
         add_contractor_service = AddContractorService(contractor_repo, audit_service)  # mventor-ticket-036
         daily_comparison_service = DailyComparisonService(report_repo_with_events)  # mventor-ticket-019
         hr_service = HRService(HRRepository(db_manager), MoneyRepository(db_manager))  # HR advances + transport
+        attendance_service = AttendanceService(AttendanceRepository(db_manager))
 
         logger.info("All services initialized.")
 
@@ -300,6 +303,7 @@ def main() -> None:
             daily_comparison_service=daily_comparison_service,
             hr_service=hr_service,
             user_repository=user_repo,
+            attendance_service=attendance_service,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop
