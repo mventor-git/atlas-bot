@@ -241,6 +241,12 @@ class AuthorizationService:
             return sites[0]
         return None
 
+    def sites_for_user(self, chat_id: str) -> list[str]:
+        """Active site IDs for a user (public; empty when none)."""
+        if self._memberships is None:
+            return []
+        return [m.site_id for m in self._memberships.active_for_user(chat_id)]
+
     def migrate_memberships(self) -> int:
         """Backfill memberships from legacy users.site_id. Returns rows created."""
         if self._memberships is None:

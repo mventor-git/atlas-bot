@@ -241,6 +241,36 @@ CREATE TABLE IF NOT EXISTS deduction_events (
 CREATE INDEX IF NOT EXISTS idx_payout_request ON payout_events(request_id);
 CREATE INDEX IF NOT EXISTS idx_deduction_request ON deduction_events(request_id);
 CREATE INDEX IF NOT EXISTS idx_deduction_period ON deduction_events(period);
+
+-- Attendance events (013 evidence chain; never boolean)
+CREATE TABLE IF NOT EXISTS attendance_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    event_date TEXT NOT NULL,
+    check_type TEXT NOT NULL DEFAULT 'in' CHECK (check_type IN ('in', 'out')),
+    method TEXT NOT NULL DEFAULT 'self' CHECK (method IN ('self', 'assisted')),
+    latitude REAL,
+    longitude REAL,
+    accuracy_m REAL,
+    location_verdict TEXT,
+    assisted_target_chat_id TEXT,
+    assisted_reason TEXT,
+    initiated_by TEXT,
+    status TEXT NOT NULL DEFAULT 'submitted'
+        CHECK (status IN ('submitted', 'pending_verification', 'confirmed',
+                          'disputed', 'exception', 'resolved')),
+    verdict TEXT,
+    confirmed_by TEXT,
+    late_minutes INTEGER,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_chat_date ON attendance_events(chat_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance_events(site_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_events(status);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -449,6 +479,35 @@ CREATE TABLE IF NOT EXISTS deduction_events (
 CREATE INDEX IF NOT EXISTS idx_payout_request ON payout_events(request_id);
 CREATE INDEX IF NOT EXISTS idx_deduction_request ON deduction_events(request_id);
 CREATE INDEX IF NOT EXISTS idx_deduction_period ON deduction_events(period);
+
+CREATE TABLE IF NOT EXISTS attendance_events (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    event_date TEXT NOT NULL,
+    check_type TEXT NOT NULL DEFAULT 'in' CHECK (check_type IN ('in', 'out')),
+    method TEXT NOT NULL DEFAULT 'self' CHECK (method IN ('self', 'assisted')),
+    latitude REAL,
+    longitude REAL,
+    accuracy_m REAL,
+    location_verdict TEXT,
+    assisted_target_chat_id TEXT,
+    assisted_reason TEXT,
+    initiated_by TEXT,
+    status TEXT NOT NULL DEFAULT 'submitted'
+        CHECK (status IN ('submitted', 'pending_verification', 'confirmed',
+                          'disputed', 'exception', 'resolved')),
+    verdict TEXT,
+    confirmed_by TEXT,
+    late_minutes INTEGER,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_chat_date ON attendance_events(chat_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance_events(site_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_events(status);
 """
 
 
