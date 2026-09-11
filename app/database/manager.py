@@ -206,6 +206,38 @@ CREATE TABLE IF NOT EXISTS user_site_memberships (
 
 CREATE INDEX IF NOT EXISTS idx_memberships_chat ON user_site_memberships(chat_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_site ON user_site_memberships(site_id);
+
+-- Money events (009 ledger: append-only financial facts)
+CREATE TABLE IF NOT EXISTS payout_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    amount REAL NOT NULL,
+    payout_date TEXT NOT NULL,
+    confirmed_by TEXT NOT NULL,
+    reference TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES hr_requests(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS deduction_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    amount REAL NOT NULL,
+    period TEXT NOT NULL,
+    deduction_date TEXT,
+    confirmed_by TEXT NOT NULL,
+    reference TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES hr_requests(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_payout_request ON payout_events(request_id);
+CREATE INDEX IF NOT EXISTS idx_deduction_request ON deduction_events(request_id);
+CREATE INDEX IF NOT EXISTS idx_deduction_period ON deduction_events(period);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -380,6 +412,37 @@ CREATE TABLE IF NOT EXISTS user_site_memberships (
 
 CREATE INDEX IF NOT EXISTS idx_memberships_chat ON user_site_memberships(chat_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_site ON user_site_memberships(site_id);
+
+CREATE TABLE IF NOT EXISTS payout_events (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    amount REAL NOT NULL,
+    payout_date TEXT NOT NULL,
+    confirmed_by TEXT NOT NULL,
+    reference TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES hr_requests(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS deduction_events (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    amount REAL NOT NULL,
+    period TEXT NOT NULL,
+    deduction_date TEXT,
+    confirmed_by TEXT NOT NULL,
+    reference TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES hr_requests(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_payout_request ON payout_events(request_id);
+CREATE INDEX IF NOT EXISTS idx_deduction_request ON deduction_events(request_id);
+CREATE INDEX IF NOT EXISTS idx_deduction_period ON deduction_events(period);
 """
 
 

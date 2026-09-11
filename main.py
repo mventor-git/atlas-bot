@@ -32,6 +32,7 @@ from app.config.loader import ConfigLoader, ConfigurationError
 from app.database.manager import DatabaseManager
 from app.repositories.report_repository import ReportRepository
 from app.repositories.membership_repository import MembershipRepository
+from app.repositories.money_repository import MoneyRepository
 from app.repositories.hr_repository import HRRepository
 from app.repositories.recent_contractor_repository import RecentContractorRepository
 from app.repositories.event_log_repository import EventLogRepository
@@ -256,7 +257,7 @@ def main() -> None:
         audit_service = AuditService(db_manager)
         add_contractor_service = AddContractorService(contractor_repo, audit_service)  # mventor-ticket-036
         daily_comparison_service = DailyComparisonService(report_repo_with_events)  # mventor-ticket-019
-        hr_service = HRService(HRRepository(db_manager))  # HR advances + transport
+        hr_service = HRService(HRRepository(db_manager), MoneyRepository(db_manager))  # HR advances + transport
 
         logger.info("All services initialized.")
 

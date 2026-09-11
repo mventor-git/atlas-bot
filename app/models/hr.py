@@ -75,3 +75,34 @@ class HRRequest:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: Optional[str] = None
     id: Optional[int] = None
+
+
+@dataclass
+class PayoutEvent:
+    """One confirmed payout against a request (append-only)."""
+
+    request_id: int
+    amount: float
+    payout_date: str
+    confirmed_by: str
+    site_id: Optional[str] = None
+    reference: Optional[str] = None
+    note: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    id: Optional[int] = None
+
+
+@dataclass
+class DeductionEvent:
+    """One confirmed payroll deduction against a request (append-only)."""
+
+    request_id: int
+    amount: float
+    period: str
+    confirmed_by: str
+    site_id: Optional[str] = None
+    deduction_date: Optional[str] = None
+    reference: Optional[str] = None
+    note: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    id: Optional[int] = None
