@@ -234,32 +234,86 @@ async def handle_worker_count(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Store workers in user_data for now (don't save yet)
         context.user_data["current_workers"] = workers
-        context.user_data["state"] = "awaiting_zone"
+        context.user_data.pop("current_craftsmen", None)
+        context.user_data.pop("current_helpers", None)
+        context.user_data["state"] = "awaiting_craftsmen"
 
-        # Show zone selection keyboard
-        contractor_search: ContractorSearchService = context.bot_data.get("contractor_search")
-        if contractor_search:
-            zones = contractor_search.get_all_zones()
-            zone_names = [z.name for z in zones]
-            keyboard = zone_selection_keyboard(zone_names)
-            await update.message.reply_text(
-                f"Workers: {workers}\n\nNow select the work zone for {contractor_name}, or skip:",
-                reply_markup=keyboard,
-                parse_mode="Markdown",
-            )
-        else:
-            # Fallback: skip zone directly
-            context.user_data["current_zone"] = None
-            context.user_data["state"] = "awaiting_details"
-            await update.message.reply_text(
-                f"Workers: {workers}\n\nEnter the work details (column G), or type /skip to leave empty:",
-                parse_mode="Markdown",
-            )
+        await update.message.reply_text(
+            f"Workers: {workers}\n\nHow many are craftsmen? (rest count as helpers, /skip for no split)",
+            parse_mode="Markdown",
+        )
 
         logger.info("Worker count entered: contractor=%s, workers=%d, user=%s", contractor_name, workers, telegram_user)
     except Exception as e:
         logger.error("Error adding worker count for user %s: %s", telegram_user, e)
         await update.message.reply_text("An error occurred while adding the contractor. Please try again.")
+
+
+async def _ask_zone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Advance to zone selection (or straight to details without search)."""
+    from app.services.contractor_search import ContractorSearchService
+
+    contractor_name = context.user_data.get("selected_contractor", "Unknown")
+    workers = context.user_data.get("current_workers", 0)
+    context.user_data["state"] = "awaiting_zone"
+
+    contractor_search: ContractorSearchService = context.bot_data.get("contractor_search")
+    if contractor_search:
+        zones = contractor_search.get_all_zones()
+        zone_names = [z.name for z in zones]
+        keyboard = zone_selection_keyboard(zone_names)
+        await update.message.reply_text(
+            f"Workers: {workers}{_split_suffix(context)}\n\nNow select the work zone for {contractor_name}, or skip:",
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+    else:
+        # Fallback: skip zone directly
+        context.user_data["current_zone"] = None
+        context.user_data["state"] = "awaiting_details"
+        await update.message.reply_text(
+            f"Workers: {workers}{_split_suffix(context)}\n\nEnter the work details (column G), or type /skip to leave empty:",
+            parse_mode="Markdown",
+        )
+
+
+def _split_suffix(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """' (C craftsmen + H helpers)' when a split was entered, else ''."""
+    craftsmen = context.user_data.get("current_craftsmen")
+    helpers = context.user_data.get("current_helpers")
+    if craftsmen is None:
+        return ""
+    return f" ({craftsmen} craftsmen + {helpers} helpers)"
+
+
+async def handle_craftsmen_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle craftsmen count (helpers = workers - craftsmen)."""
+    if context.user_data.get("state") != "awaiting_craftsmen":
+        return
+
+    telegram_user = str(update.effective_user.id)
+
+    try:
+        text = update.message.text.strip()
+        if not text.isdigit():
+            await update.message.reply_text("Please enter a valid number.")
+            return
+
+        craftsmen = int(text)
+        workers = context.user_data.get("current_workers", 0)
+        if craftsmen > workers:
+            await update.message.reply_text(
+                f"Craftsmen cannot exceed {workers} workers.")
+            return
+
+        context.user_data["current_craftsmen"] = craftsmen
+        context.user_data["current_helpers"] = workers - craftsmen
+        await _ask_zone(update, context)
+
+        logger.info("Craftsmen entered: %d of %d (user=%s)", craftsmen, workers, telegram_user)
+    except Exception as e:
+        logger.error("Error adding craftsmen count for user %s: %s", telegram_user, e)
+        await update.message.reply_text("An error occurred while adding the split. Please try again.")
 
 
 async def handle_zone_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -317,6 +371,8 @@ async def handle_details_input(update: Update, context: ContextTypes.DEFAULT_TYP
             zone=zone,
             details=details,
             contractor_code=context.user_data.get("selected_contractor_code"),
+            craftsmen=context.user_data.get("current_craftsmen"),
+            helpers=context.user_data.get("current_helpers"),
         )
 
         report: Report = context.user_data.get("current_report")
@@ -337,9 +393,11 @@ async def handle_details_input(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as audit_e:
             logger.warning("Failed to audit log addition: %s", audit_e)
 
-        # Clear temporary data
+        # Clear temporary data (capture split display first)
+        split_suffix = _split_suffix(context)
         for key in ("selected_contractor", "selected_contractor_raw_name", "selected_contractor_type",
-                     "selected_contractor_code", "current_workers", "current_zone"):
+                     "selected_contractor_code", "current_workers", "current_craftsmen",
+                     "current_helpers", "current_zone"):
             context.user_data.pop(key, None)
 
         # Show contractor list again for adding more
@@ -359,7 +417,7 @@ async def handle_details_input(update: Update, context: ContextTypes.DEFAULT_TYP
             keyboard = contractor_selection_keyboard(contractor_tuples, page=0, total_pages=total_pages)
             await update.message.reply_text(
                 f"\u2705 *Added {contractor_name}*\n"
-                f"Workers: {workers}\n"
+                f"Workers: {workers}{split_suffix}\n"
                 f"Zone: {zone or '—'}\n"
                 f"Details: {details or '—'}\n\n"
                 f"Select another contractor from the list, or type /done to finish:",
@@ -392,6 +450,10 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if state == "awaiting_details":
         await handle_details_input(update, context)
+    elif state == "awaiting_craftsmen":
+        context.user_data.pop("current_craftsmen", None)
+        context.user_data.pop("current_helpers", None)
+        await _ask_zone(update, context)
     elif state == "awaiting_zone":
         context.user_data["current_zone"] = None
         context.user_data["state"] = "awaiting_details"
@@ -439,6 +501,16 @@ async def back_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text("Send the contractor name:")
 
     elif state == "awaiting_zone":
+        # Back to craftsmen split input
+        context.user_data["state"] = "awaiting_craftsmen"
+        contractor_name = context.user_data.get("selected_contractor", "Unknown")
+        workers = context.user_data.get("current_workers", 0)
+        await update.message.reply_text(
+            f"Workers: {workers}\n\nHow many are craftsmen? (rest count as helpers, /skip for no split)",
+            parse_mode="Markdown",
+        )
+
+    elif state == "awaiting_craftsmen":
         # Back to worker count input
         context.user_data["state"] = "awaiting_worker_count"
         contractor_name = context.user_data.get("selected_contractor", "Unknown")
@@ -571,6 +643,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await handle_contractor_name(update, context)
     elif state == "awaiting_worker_count":
         await handle_worker_count(update, context)
+    elif state == "awaiting_craftsmen":
+        await handle_craftsmen_input(update, context)
     elif state == "awaiting_details":
         await handle_details_input(update, context)
     elif state == "awaiting_search_query":
