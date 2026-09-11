@@ -209,10 +209,19 @@ async def _ask_site(update: Update, context: ContextTypes.DEFAULT_TYPE, resume: 
 
 
 async def _route_to_confirmer(update, context, event) -> None:
-    """Notify the site confirmer, or auto-confirm when none is configured."""
+    """Notify the first eligible confirmer, else system auto-confirm.
+
+    Chain: primary confirmer -> confirmer_fallback site key -> auto-confirm.
+    Nobody confirms their own check-in. Time-based escalation is OUT
+    (needs a scheduler + owner timing values).
+    """
     site = _site_config(context, event.site_id)
-    confirmer = site.get("confirmer") if isinstance(site, dict) else None
-    if not confirmer or str(confirmer) == str(event.chat_id):
+    candidates = []
+    if isinstance(site, dict):
+        candidates = [site.get("confirmer"), site.get("confirmer_fallback")]
+    target = next(
+        (c for c in candidates if c and str(c) != str(event.chat_id)), None)
+    if target is None:
         service = _attendance(context)
         try:
             service.confirm(event.id, "system", site_id=event.site_id)
@@ -225,7 +234,7 @@ async def _route_to_confirmer(update, context, event) -> None:
         InlineKeyboardButton("Dispute", callback_data=f"att_dispute:{event.id}"),
     ]])
     await _notify(
-        context, str(confirmer),
+        context, str(target),
         f"Attendance to review: `{event.chat_id}` "
         f"({event.check_type}, {event.location_verdict or 'unchecked'}).",
         reply_markup=keyboard)
