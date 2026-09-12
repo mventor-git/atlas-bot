@@ -1403,8 +1403,10 @@ class TestDatabaseWorkflow:
         events = event_log.get_by_action("report.finalized")
         assert len(events) == 1
 
-        # Lock report
-        locked = workflow.lock_report(finalized, "user123")
+        # Lock report (via reviewer approval, 027)
+        approved = workflow.approve_report(finalized, "pm1")
+        assert approved.status == ReportStatus.APPROVED
+        locked = workflow.lock_report(approved, "user123")
         assert locked.status == ReportStatus.LOCKED
         assert locked.locked_at is not None
 

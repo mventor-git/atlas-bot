@@ -732,6 +732,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             from app.bot.handlers import payroll as payroll_handlers
 
             await payroll_handlers.handle_salary_csv(update, context)
+        elif state == "awaiting_report_reject_note":
+            from app.bot.handlers import start as start_handlers
+
+            await start_handlers.handle_report_reject_note(update, context)
     elif state in ("awaiting_finalize_confirmation", "awaiting_lock_confirmation"):
         await update.message.reply_text(
             "Please use the confirmation buttons above, or type /cancel to go back.",

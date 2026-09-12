@@ -2,10 +2,11 @@
 Tests for ReportWorkflowService.
 
 Covers:
-- Valid transitions: Draft -> Final -> Locked -> Draft (admin)
+- Valid transitions: Draft -> Final -> Approved -> Locked -> Draft (admin);
+  Final -> Rejected -> Draft (resubmit); note required on rejection.
 - Invalid transitions (ReportLifecycleError raised)
 - Admin-only unlock enforcement
-- Auto-lock of expired reports
+- Auto-lock of expired APPROVED reports only (FINAL never auto-locks)
 - EventLogService integration (events logged on each transition)
 - Edge cases: None status, missing timestamps, already-locked reports
 """
@@ -101,8 +102,9 @@ class TestReportWorkflowService:
 
     @pytest.fixture
     def locked_report(self, workflow: ReportWorkflowService, final_report: Report) -> Report:
-        """Create a locked report."""
-        return workflow.lock_report(final_report, telegram_user="user123")
+        """Create a locked report (via approval, 027)."""
+        approved = workflow.approve_report(final_report, telegram_user="pm1")
+        return workflow.lock_report(approved, telegram_user="user123")
 
     # ------------------------------------------------------------------
     # Valid Transitions
@@ -116,12 +118,18 @@ class TestReportWorkflowService:
         assert result.updated_at is not None
         assert result.updated_at >= result.finalized_at
 
-    def test_lock_final_report(self, workflow: ReportWorkflowService, final_report: Report):
-        """Should transition Final -> Locked and set locked_at/locked_by."""
-        result = workflow.lock_report(final_report, telegram_user="user456")
+    def test_lock_approved_report(self, workflow: ReportWorkflowService, final_report: Report):
+        """Should transition Approved -> Locked and set locked_at/locked_by."""
+        approved = workflow.approve_report(final_report, telegram_user="pm1")
+        result = workflow.lock_report(approved, telegram_user="user456")
         assert result.status == ReportStatus.LOCKED
         assert result.locked_at is not None
         assert result.locked_by == "user456"
+
+    def test_lock_final_refused_without_approval(self, workflow: ReportWorkflowService, final_report: Report):
+        """Phase 3a: FINAL -> LOCKED is refused; review first."""
+        with pytest.raises(ReportLifecycleError):
+            workflow.lock_report(final_report, telegram_user="user456")
 
     def test_unlock_locked_report(self, workflow: ReportWorkflowService, locked_report: Report):
         """Should transition Locked -> Draft when admin=True."""
@@ -129,18 +137,135 @@ class TestReportWorkflowService:
         assert result.status == ReportStatus.DRAFT
 
     def test_full_lifecycle(self, workflow: ReportWorkflowService, draft_report: Report):
-        """Should complete the full cycle: Draft -> Final -> Locked -> Draft."""
+        """Full cycle: Draft -> Final -> Approved -> Locked -> Draft."""
         # Draft -> Final
         r1 = workflow.finalize_report(draft_report, telegram_user="user1")
         assert r1.status == ReportStatus.FINAL
 
-        # Final -> Locked
-        r2 = workflow.lock_report(r1, telegram_user="user2")
+        # Final -> Approved (reviewer)
+        r1b = workflow.approve_report(r1, telegram_user="pm1")
+        assert r1b.status == ReportStatus.APPROVED
+        assert r1b.approved_by == "pm1"
+
+        # Approved -> Locked
+        r2 = workflow.lock_report(r1b, telegram_user="user2")
         assert r2.status == ReportStatus.LOCKED
 
         # Locked -> Draft (admin)
         r3 = workflow.unlock_report(r2, telegram_user="admin", admin=True)
         assert r3.status == ReportStatus.DRAFT
+
+    # ------------------------------------------------------------------
+    # Review workflow (027)
+    # ------------------------------------------------------------------
+
+    def test_approve_final(self, workflow: ReportWorkflowService, final_report: Report):
+        """FINAL -> APPROVED stamps reviewer and time."""
+        result = workflow.approve_report(final_report, telegram_user="pm1",
+                                         note="looks good")
+        assert result.status == ReportStatus.APPROVED
+        assert result.approved_by == "pm1"
+        assert result.approved_at is not None
+
+    def test_approve_requires_final(self, workflow: ReportWorkflowService, draft_report: Report):
+        """Cannot approve a draft (or anything but FINAL)."""
+        with pytest.raises(ReportLifecycleError):
+            workflow.approve_report(draft_report, telegram_user="pm1")
+
+    def test_reject_final_needs_note(self, workflow: ReportWorkflowService, final_report: Report):
+        """FINAL -> REJECTED stamps reviewer + required note."""
+        result = workflow.reject_report(final_report, telegram_user="pm1",
+                                        note="Zone B missing")
+        assert result.status == ReportStatus.REJECTED
+        assert result.rejected_by == "pm1"
+        assert result.reject_note == "Zone B missing"
+
+    def test_reject_blank_note_refused(self, workflow: ReportWorkflowService, final_report: Report):
+        """Rejection without a note is refused."""
+        with pytest.raises(ReportLifecycleError):
+            workflow.reject_report(final_report, telegram_user="pm1", note="   ")
+        assert final_report.status == ReportStatus.FINAL
+
+    def test_reject_non_final_refused(self, workflow: ReportWorkflowService, draft_report: Report):
+        """Cannot reject a draft."""
+        with pytest.raises(ReportLifecycleError):
+            workflow.reject_report(draft_report, telegram_user="pm1", note="x")
+
+    def test_resubmit_rejected_to_draft(self, workflow: ReportWorkflowService, final_report: Report):
+        """REJECTED -> DRAFT keeps the rejection note for the audit trail."""
+        rejected = workflow.reject_report(final_report, telegram_user="pm1",
+                                          note="fix zone B")
+        result = workflow.resubmit_report(rejected, telegram_user="user123")
+        assert result.status == ReportStatus.DRAFT
+        assert result.reject_note == "fix zone B"
+
+    def test_resubmit_non_rejected_refused(self, workflow: ReportWorkflowService, final_report: Report):
+        """Cannot resubmit a FINAL report."""
+        with pytest.raises(ReportLifecycleError):
+            workflow.resubmit_report(final_report, telegram_user="user123")
+
+    def test_review_events_logged(self, workflow: ReportWorkflowService, final_report: Report,
+                                  event_log_repo: EventLogRepository):
+        """approve writes an audit entry."""
+        workflow.approve_report(final_report, telegram_user="pm1")
+        events = event_log_repo.get_by_object("report", final_report.id)
+        actions = {e.action for e in events}
+        assert "report.approved" in actions
+
+    def test_reject_resubmit_events_logged(self, workflow: ReportWorkflowService,
+                                           draft_report: Report,
+                                           event_log_repo: EventLogRepository):
+        """Reject + resubmit each write an audit entry."""
+        final = workflow.finalize_report(draft_report, telegram_user="user123")
+        workflow.reject_report(final, telegram_user="pm1", note="n")
+        workflow.resubmit_report(final, telegram_user="user123")
+        events = event_log_repo.get_by_object("report", final.id)
+        actions = {e.action for e in events}
+        assert "report.rejected" in actions
+        assert "report.resubmitted" in actions
+
+    def test_old_db_rebuild_preserves_rows(self, db_path: Path):
+        """Legacy reports table (old CHECK, no stamp cols) widens in place."""
+        import sqlite3
+
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """CREATE TABLE reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL, day TEXT NOT NULL,
+                site_id TEXT NOT NULL DEFAULT 'default',
+                status TEXT NOT NULL DEFAULT 'draft'
+                    CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
+                pdf_path TEXT, excel_path TEXT, preview_pdf_path TEXT,
+                telegram_user TEXT, created_at TEXT NOT NULL,
+                updated_at TEXT, finalized_at TEXT,
+                locked_at TEXT, locked_by TEXT, source_date TEXT,
+                UNIQUE(date, site_id)
+            )""")
+        conn.execute(
+            "INSERT INTO reports (date, day, status, telegram_user, created_at)"
+            " VALUES ('2026-07-01', 'x', 'final', 'u1', '2026-07-01T08:00:00')")
+        conn.commit()
+        conn.close()
+
+        manager = DatabaseManager(str(db_path))
+        try:
+            assert manager.column_exists("reports", "approved_by")
+            assert manager.column_exists("reports", "reject_note")
+            row = manager.execute(
+                "SELECT status, telegram_user FROM reports").fetchone()
+            assert row["status"] == "final" and row["telegram_user"] == "u1"
+            repo = ReportRepository(manager)
+            rep = repo.get_by_date("2026-07-01")
+            assert rep is not None and rep.approved_by is None
+            # New CHECK accepts the review states on the migrated table.
+            rep.status = ReportStatus.APPROVED
+            manager.execute("UPDATE reports SET status='approved' WHERE id=?",
+                            (rep.id,))
+            manager.commit()
+        finally:
+            manager.close_all()
 
     # ------------------------------------------------------------------
     # Invalid Transitions
@@ -221,16 +346,18 @@ class TestReportWorkflowService:
     def test_auto_lock_expired_report(
         self, repo: ReportRepository, event_log_service: EventLogService, config: AppConfig
     ):
-        """Should auto-lock a report past the auto-lock threshold."""
-        # Create a finalized report from long ago
+        """Should auto-lock an APPROVED report past the auto-lock threshold."""
+        # Create an approved report from long ago
         old_time = (datetime.now() - timedelta(hours=48)).isoformat()
         report = Report(
             date="2026-07-09",
             day="الخميس",
-            status=ReportStatus.FINAL,
+            status=ReportStatus.APPROVED,
             telegram_user="user1",
             created_at=old_time,
             finalized_at=old_time,
+            approved_by="pm1",
+            approved_at=old_time,
         )
         repo.add(report)
 
@@ -242,6 +369,25 @@ class TestReportWorkflowService:
         locked = repo.get_by_id(report.id)
         assert locked is not None
         assert locked.status == ReportStatus.LOCKED
+
+    def test_auto_lock_skips_unapproved_final(
+        self, repo: ReportRepository, event_log_service: EventLogService, config: AppConfig
+    ):
+        """Phase 3a: old FINAL reports never auto-lock without review."""
+        old_time = (datetime.now() - timedelta(hours=48)).isoformat()
+        report = Report(
+            date="2026-07-09",
+            day="الخميس",
+            status=ReportStatus.FINAL,
+            telegram_user="user1",
+            created_at=old_time,
+            finalized_at=old_time,
+        )
+        repo.add(report)
+
+        count = ReportWorkflowService(repo, event_log_service, config).auto_lock_reports()
+        assert count == 0
+        assert repo.get_by_id(report.id).status == ReportStatus.FINAL
 
     def test_auto_lock_recent_report(
         self, repo: ReportRepository, event_log_service: EventLogService, config: AppConfig
@@ -293,8 +439,9 @@ class TestReportWorkflowService:
     def test_lock_logs_event(
         self, workflow: ReportWorkflowService, final_report: Report, event_log_repo: EventLogRepository
     ):
-        """Should log report.locked event on lock."""
-        workflow.lock_report(final_report, telegram_user="user456")
+        """Should log report.locked event on lock (via approval)."""
+        approved = workflow.approve_report(final_report, telegram_user="pm1")
+        workflow.lock_report(approved, telegram_user="user456")
         events = event_log_repo.get_by_object("report", final_report.id)
         assert any(e.action == "report.locked" for e in events)
 
@@ -315,10 +462,12 @@ class TestReportWorkflowService:
         report = Report(
             date="2026-07-09",
             day="الخميس",
-            status=ReportStatus.FINAL,
+            status=ReportStatus.APPROVED,
             telegram_user="user1",
             created_at=old_time,
             finalized_at=old_time,
+            approved_by="pm1",
+            approved_at=old_time,
         )
         inserted = repo.add(report)
 
@@ -602,8 +751,9 @@ class TestReportWorkflowService:
         r1 = workflow_with_versions.finalize_report(draft, telegram_user="u1")
         assert len(version_repo.get_versions(r1.id)) == 1
 
-        # Full cycle back to Draft: Final -> Locked -> Draft (admin unlock)
-        locked = workflow_with_versions.lock_report(r1, telegram_user="admin")
+        # Full cycle back to Draft: Final -> Approved -> Locked -> Draft (admin)
+        approved = workflow_with_versions.approve_report(r1, telegram_user="pm1")
+        locked = workflow_with_versions.lock_report(approved, telegram_user="admin")
         unlocked = workflow_with_versions.unlock_report(locked, telegram_user="admin", admin=True)
         assert unlocked.status == ReportStatus.DRAFT
 
@@ -679,9 +829,10 @@ class TestReportWorkflowService:
         finalized = wf.finalize_report(draft_report, telegram_user="u1")
         assert len(version_repo.get_versions(finalized.id)) == 1
 
-        # Cycle through Lock -> Unlock -> Finalize 3 more times
+        # Cycle through Approve -> Lock -> Unlock -> Finalize 3 more times
         for i in range(3):
-            locked = wf.lock_report(finalized, telegram_user="admin")
+            approved = wf.approve_report(finalized, telegram_user="pm1")
+            locked = wf.lock_report(approved, telegram_user="admin")
             unlocked = wf.unlock_report(locked, telegram_user="admin", admin=True)
             finalized = wf.finalize_report(unlocked, telegram_user=f"u{i+2}")
 

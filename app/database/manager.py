@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS reports (
     day TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
     status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
+        CHECK (status IN ('draft', 'final', 'approved', 'rejected', 'locked', 'no_report')),
     pdf_path TEXT,
     excel_path TEXT,
     preview_pdf_path TEXT,
@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS reports (
     finalized_at TEXT,
     locked_at TEXT,
     locked_by TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    rejected_by TEXT,
+    reject_note TEXT,
     source_date TEXT,
     UNIQUE(date, site_id)
 );
@@ -399,7 +403,7 @@ CREATE TABLE IF NOT EXISTS reports (
     day TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
     status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (status IN ('draft', 'final', 'locked', 'no_report')),
+        CHECK (status IN ('draft', 'final', 'approved', 'rejected', 'locked', 'no_report')),
     pdf_path TEXT,
     excel_path TEXT,
     preview_pdf_path TEXT,
@@ -409,6 +413,10 @@ CREATE TABLE IF NOT EXISTS reports (
     finalized_at TEXT,
     locked_at TEXT,
     locked_by TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    rejected_by TEXT,
+    reject_note TEXT,
     source_date TEXT,
     UNIQUE(date, site_id)
 );
@@ -805,6 +813,8 @@ class DatabaseManager:
         self._ensure_report_items_split()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
         self._ensure_site_uniques()
+        # Review states + stamp columns on pre-existing reports (027).
+        self._ensure_reports_review()
 
         logger.info(
             "Database initialized: %s (backend=%s)",
@@ -1064,6 +1074,92 @@ class DatabaseManager:
             conn.rollback()
             raise DatabaseError(
                 f"Failed to widen reports uniqueness: {e}",
+                original_exception=e,
+            ) from e
+
+    def _ensure_reports_review(self) -> None:
+        """Add review states + stamp columns to reports on old DBs (027).
+
+        Rebuilds (rename → create → copy → drop) when approved_by is
+        missing or the status CHECK lacks 'approved'. Runs AFTER
+        _ensure_site_uniques so the legacy-unique rebuild (which uses the
+        old DDL) always precedes it. Idempotent afterwards.
+        FK-safe like _ensure_hr_requests_v2.
+        """
+        if not self.table_exists("reports"):
+            return  # fresh installs get the new DDL directly
+        if self.column_exists("reports", "approved_by"):
+            if self._pg:
+                return
+            row = self.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' "
+                "AND name='reports'"
+            ).fetchone()
+            if row is None or "'approved'" in (row["sql"] or ""):
+                return
+        cols = ("id, date, day, site_id, status, pdf_path, excel_path,"
+                " preview_pdf_path, telegram_user, created_at, updated_at,"
+                " finalized_at, locked_at, locked_by, source_date")
+        create_cols = (
+            "status TEXT NOT NULL DEFAULT 'draft'"
+            " CHECK (status IN ('draft', 'final', 'approved', 'rejected',"
+            " 'locked', 'no_report'))"
+        )
+        try:
+            conn = self._get_connection()
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("ALTER TABLE reports RENAME TO reports_old")
+            conn.execute(
+                """CREATE TABLE reports (
+                    id %s,
+                    date TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
+                    %s,
+                    pdf_path TEXT,
+                    excel_path TEXT,
+                    preview_pdf_path TEXT,
+                    telegram_user TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    finalized_at TEXT,
+                    locked_at TEXT,
+                    locked_by TEXT,
+                    approved_by TEXT,
+                    approved_at TEXT,
+                    rejected_by TEXT,
+                    reject_note TEXT,
+                    source_date TEXT,
+                    UNIQUE(date, site_id)
+                )""" % ("SERIAL PRIMARY KEY" if self._pg
+                         else "INTEGER PRIMARY KEY AUTOINCREMENT", create_cols)
+            )
+            conn.execute(
+                "INSERT INTO reports (%s) SELECT %s FROM reports_old" % (cols, cols)
+            )
+            conn.execute("DROP TABLE reports_old")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_site ON reports(site_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_date_status ON reports(date, status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(telegram_user)")
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=ON")
+            conn.commit()
+            logger.info("reports widened for review workflow (027).")
+        except _DB_ERRORS as e:
+            try:
+                if not self._pg:
+                    conn.execute("PRAGMA foreign_keys=ON")
+            except _DB_ERRORS:
+                pass
+            try:
+                conn.rollback()
+            except _DB_ERRORS:
+                pass
+            raise DatabaseError(
+                f"Failed to widen reports: {e}",
                 original_exception=e,
             ) from e
 

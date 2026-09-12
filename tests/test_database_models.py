@@ -62,8 +62,8 @@ class TestReportStatus:
     def test_all_values_unique(self):
         """All enum values should be unique (aliases excluded)."""
         values = set(s.value for s in ReportStatus)
-        assert len(values) == 4, (
-            f"Expected 4 unique values, got {len(values)}: {values}"
+        assert len(values) == 6, (
+            f"Expected 6 unique values, got {len(values)}: {values}"
         )
 
 

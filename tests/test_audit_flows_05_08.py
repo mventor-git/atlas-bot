@@ -65,6 +65,7 @@ class MockHelpers:
 
     @staticmethod
     def mock_authorization_service(role: str = "normal_user") -> MagicMock:
+        from app.auth import capabilities as caps
         from app.services.authorization_service import AuthorizationService
         mock = MagicMock(spec=AuthorizationService)
         mock.get_role.return_value = role
@@ -78,6 +79,11 @@ class MockHelpers:
         mock.can_manage_users.return_value = role in ("superadmin", "admin")
         mock.get_super_admin_chat_id.return_value = "999999999"
         mock.get_all_admin_chat_ids.return_value = {"999999999", "888888888"}
+        mock.has_capability.side_effect = (
+            lambda chat_id, cap, site_id=None: cap in caps.for_role(role))
+        mock.resolve_active_site.side_effect = (
+            lambda chat_id, session=None: session or "default")
+        mock.sites_for_user.return_value = ["default"]
         return mock
 
     @staticmethod
@@ -133,7 +139,8 @@ class TestFlow5_ViewReport:
 
         await handle_main_menu_callback(update, context)
 
-        repo_mock.get_by_date.assert_called_once_with(date.today().isoformat())
+        repo_mock.get_by_date.assert_called_once_with(date.today().isoformat(),
+                                                      site_id="default")
         update.callback_query.edit_message_text.assert_called_once()
         call_text = update.callback_query.edit_message_text.call_args[0][0]
         assert "Test Co" in call_text
@@ -516,7 +523,7 @@ class TestFlow8_LockReport:
 
     @pytest.mark.asyncio
     async def test_8a_admin_lock_on_final_shows_confirmation(self):
-        """admin clicks 'Lock' on final report -> confirmation shown."""
+        """admin clicks 'Lock' on approved report -> confirmation shown."""
         from app.bot.handlers.start import handle_main_menu_callback
         from app.models.database import Report, ReportItem, ReportStatus
 
@@ -524,7 +531,7 @@ class TestFlow8_LockReport:
 
         item = ReportItem(contractor="Test Co", workers=10)
         report = Report(
-            date="2026-07-13", day="Monday", status=ReportStatus.FINAL,
+            date="2026-07-13", day="Monday", status=ReportStatus.APPROVED,
             items=[item], id=1,
         )
 
@@ -642,4 +649,4 @@ class TestFlow8_LockReport:
 
         update.callback_query.edit_message_text.assert_called_once()
         call_text = update.callback_query.edit_message_text.call_args[0][0]
-        assert "must be" in call_text.lower() and "final" in call_text.lower()
+        assert "must be" in call_text.lower() and "approved" in call_text.lower()

@@ -29,8 +29,9 @@ class ReportWorkflowService:
     """Service for managing report lifecycle transitions.
 
     Encapsulates all business rules around status transitions
-    (Draft <-> Final <-> Locked), including validation, timestamp
-    management, event logging, and optional version snapshot creation.
+    (Draft -> Final -> Approved/Rejected -> Locked), including validation,
+    timestamp management, event logging, and optional version snapshot
+    creation.
 
     When a version_repository is provided, each finalize_report()
     call automatically creates a version snapshot and prunes old
@@ -39,7 +40,9 @@ class ReportWorkflowService:
 
     VALID_TRANSITIONS: dict[ReportStatus, set[ReportStatus]] = {
         ReportStatus.DRAFT: {ReportStatus.FINAL},
-        ReportStatus.FINAL: {ReportStatus.LOCKED},
+        ReportStatus.FINAL: {ReportStatus.APPROVED, ReportStatus.REJECTED},
+        ReportStatus.APPROVED: {ReportStatus.LOCKED},
+        ReportStatus.REJECTED: {ReportStatus.DRAFT},
         ReportStatus.LOCKED: {ReportStatus.DRAFT},
     }
 
@@ -118,17 +121,20 @@ class ReportWorkflowService:
     def lock_report(
         self, report: Report, telegram_user: str
     ) -> Report:
-        """Transition a report from Final to Locked status.
+        """Transition a report from Approved to Locked status.
+
+        Locking requires prior reviewer approval (Phase 3a, 027): FINAL
+        reports must be approved first; FINAL -> LOCKED is refused.
 
         Args:
-            report: The report to lock (must be in FINAL status).
+            report: The report to lock (must be APPROVED).
             telegram_user: Who is performing the action.
 
         Returns:
             The updated report in LOCKED status.
 
         Raises:
-            ReportLifecycleError: If the report is not in FINAL status.
+            ReportLifecycleError: If the report is not APPROVED.
         """
         self._validate_transition(report, ReportStatus.LOCKED)
 
@@ -142,6 +148,73 @@ class ReportWorkflowService:
         self._event_log.log_report_locked(telegram_user, report)
         logger.info(
             "Report locked: id=%s, date=%s, user=%s",
+            report.id, report.date, telegram_user,
+        )
+        return updated
+
+    def approve_report(
+        self, report: Report, telegram_user: str, note: str = ""
+    ) -> Report:
+        """Transition a report from Final to Approved (027).
+
+        Args:
+            report: The report to approve (must be FINAL).
+            telegram_user: Reviewer (capability gate lives in handlers).
+            note: Optional reviewer note (kept on the record).
+        """
+        self._validate_transition(report, ReportStatus.APPROVED)
+
+        now = datetime.now().isoformat()
+        report.status = ReportStatus.APPROVED
+        report.approved_by = telegram_user
+        report.approved_at = now
+        report.updated_at = now
+
+        updated = self._repo.update(report, force=True)
+        self._event_log.log_report_approved(telegram_user, report, note=note)
+        logger.info(
+            "Report approved: id=%s, date=%s, user=%s",
+            report.id, report.date, telegram_user,
+        )
+        return updated
+
+    def reject_report(
+        self, report: Report, telegram_user: str, note: str
+    ) -> Report:
+        """Transition a report from Final to Rejected (027, note required)."""
+        self._validate_transition(report, ReportStatus.REJECTED)
+        if not (note or "").strip():
+            raise ReportLifecycleError(
+                "Rejection requires a note.",
+                current_status=report.status.value,
+                target_status=ReportStatus.REJECTED.value,
+            )
+
+        now = datetime.now().isoformat()
+        report.status = ReportStatus.REJECTED
+        report.rejected_by = telegram_user
+        report.reject_note = note.strip()
+        report.updated_at = now
+
+        updated = self._repo.update(report, force=True)
+        self._event_log.log_report_rejected(telegram_user, report)
+        logger.info(
+            "Report rejected: id=%s, date=%s, user=%s",
+            report.id, report.date, telegram_user,
+        )
+        return updated
+
+    def resubmit_report(self, report: Report, telegram_user: str) -> Report:
+        """Transition a report from Rejected back to Draft (027)."""
+        self._validate_transition(report, ReportStatus.DRAFT)
+
+        report.status = ReportStatus.DRAFT
+        report.updated_at = datetime.now().isoformat()
+
+        updated = self._repo.update(report, force=True)
+        self._event_log.log_report_resubmitted(telegram_user, report)
+        logger.info(
+            "Report resubmitted: id=%s, date=%s, user=%s",
             report.id, report.date, telegram_user,
         )
         return updated
@@ -197,6 +270,7 @@ class ReportWorkflowService:
         current_minute: int | None = None,
         telegram_user: str = "system",
         today_str: str | None = None,
+        site_id: str | None = None,
     ) -> int:
         """Auto-finalize draft reports for today after the configured deadline.
 
@@ -237,7 +311,7 @@ class ReportWorkflowService:
         finalized_count = 0
 
         # Use get_by_date() which loads items (get_all() skips items for performance)
-        today_report = self._repo.get_by_date(today_str)
+        today_report = self._repo.get_by_date(today_str, site_id=site_id)
         if today_report is None:
             return 0
 
@@ -262,11 +336,14 @@ class ReportWorkflowService:
             )
         return finalized_count
 
-    def auto_lock_reports(self, telegram_user: str = "system") -> int:
-        """Automatically lock reports that have passed the auto-lock threshold.
+    def auto_lock_reports(self, telegram_user: str = "system",
+                            site_id: str | None = None) -> int:
+        """Automatically lock APPROVED reports past the auto-lock threshold.
 
-        Scans all FINAL reports and locks those whose finalized_at timestamp
-        is older than ``lifecycle.auto_lock_hours``.
+        Only APPROVED reports lock (Phase 3a: FINAL must be reviewed first).
+        ``site_id`` scopes the sweep; None keeps the deployment default so
+        Phase 6 can loop sites explicitly. Scans reports whose finalized_at
+        timestamp is older than ``lifecycle.auto_lock_hours``.
 
         Args:
             telegram_user: Who to attribute the auto-lock action to
@@ -282,9 +359,9 @@ class ReportWorkflowService:
         threshold = datetime.now() - timedelta(hours=auto_hours)
         locked_count = 0
 
-        all_reports = self._repo.get_all()
+        all_reports = self._repo.get_all(site_id=site_id)
         for report in all_reports:
-            if report.status != ReportStatus.FINAL:
+            if report.status != ReportStatus.APPROVED:
                 continue
             if not report.finalized_at:
                 continue
