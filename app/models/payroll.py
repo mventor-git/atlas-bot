@@ -48,3 +48,5 @@ class PayrollLine:
     deductions: float = 0.0
     net: float = 0.0
     id: Optional[int] = None
+    salary_history_id: Optional[int] = None
+    """Provenance: salary_history row in effect when built (5A)."""

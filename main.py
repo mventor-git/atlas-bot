@@ -319,7 +319,9 @@ def main() -> None:
         migrated = auth_service.migrate_memberships()
         if migrated:
             logger.info("Migrated %d legacy site memberships.", migrated)
-        payroll_service = PayrollService(PayrollRepository(db_manager), user_repo)
+        payroll_service = PayrollService(PayrollRepository(db_manager),
+                                         user_repo,
+                                         membership_repo=membership_repo)
         notification_outbox = NotificationOutbox(
             NotificationRepository(db_manager),
             max_attempts=config.notification.notify_max_attempts,

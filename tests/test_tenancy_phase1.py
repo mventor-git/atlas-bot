@@ -52,7 +52,8 @@ class Stack:
         from app.repositories.discipline_repository import DisciplineRepository
         from app.services.discipline_service import DisciplineService
         self.disc = DisciplineService(DisciplineRepository(self.db))
-        self.pay = PayrollService(PayrollRepository(self.db), self.users)
+        self.pay = PayrollService(PayrollRepository(self.db), self.users,
+                                  membership_repo=self.members)
         self.att = AttendanceService(AttendanceRepository(self.db))
         self.hr = HRService(HRRepository(self.db), MoneyRepository(self.db))
 
@@ -225,6 +226,9 @@ class TestHandlerIsolation:
         run = stack.pay.create_run("2026-09", "1", site_id="a")
         stack.pay.add_line(run.id, "16", 10000.0, site_id="a")
         other = stack.pay.create_run("2026-09", "1", site_id="b")
+        stack.make_user("99", role="normal_user", site="b")
+        stack.members.grant("99", "b", [])
+        stack.users.set_salary("99", 7000)
         stack.pay.add_line(other.id, "99", 7000.0, site_id="b")
         ctx = _ctx(stack)
         upd = _msg("/mypay 2026-09", user_id=16)
