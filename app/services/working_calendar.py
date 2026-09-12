@@ -90,7 +90,7 @@ class WorkingCalendar:
             return False
         if weekday in self.weekend_days():
             return False
-        return not self._holidays.is_holiday(day_str)
+        return not self._holidays.is_named_holiday(day_str)
 
     def describe(self, day: str | date | datetime) -> tuple[bool, str | None]:
         """(required, reason) for UX and audit trails."""
@@ -109,7 +109,6 @@ class WorkingCalendar:
             return False, None
         if weekday in self.weekend_days():
             return False, "weekend"
-        name = self._holidays.get_holiday_name(day_str)
-        if name:
-            return False, name
+        if self._holidays.is_named_holiday(day_str):
+            return False, self._holidays.get_holiday_name(day_str)
         return True, "working day"

@@ -89,6 +89,18 @@ class HolidayCalendarService:
         # Check loaded holidays
         return date_str in self._holidays
 
+    def is_named_holiday(self, date_or_str: str | date | datetime) -> bool:
+        """Check if a date is a named holiday from the calendar file.
+
+        Unlike is_holiday(), this ignores the Friday rule: weekend
+        handling belongs to the site layer (WorkingCalendar), not the
+        national-holiday data source.
+        """
+        if not self._enforce_holidays:
+            return False
+        date_str = self._to_date_str(date_or_str)
+        return bool(date_str) and date_str in self._holidays
+
     def is_working_day(self, date_or_str: str | date | datetime) -> bool:
         """Check if a date is a normal working day (not holiday, not Friday).
 

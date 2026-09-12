@@ -24,6 +24,9 @@ class StubHolidays:
     def is_holiday(self, day):
         return self._enforce_holidays and day in self._days
 
+    def is_named_holiday(self, day):
+        return self._enforce_holidays and day in self._days
+
     def get_holiday_name(self, day):
         return self._days.get(day)
 

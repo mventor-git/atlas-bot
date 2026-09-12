@@ -268,6 +268,209 @@ class TestReportWorkflowService:
             manager.close_all()
 
     # ------------------------------------------------------------------
+    # 3.1 calendar-gated auto-finalize + 3.2 approval separation of duties
+    # ------------------------------------------------------------------
+
+    def _cal(self, site, holidays=None, enforce=True, extra_sites=None):
+        """Deterministic WorkingCalendar (no holiday-file dependency)."""
+        from types import SimpleNamespace
+
+        from app.services.working_calendar import WorkingCalendar
+
+        sites = [{"id": "a"}, {"id": "b"}]
+        if extra_sites:
+            sites.extend(extra_sites)
+
+        class StubHolidays:
+            _enforce_holidays = enforce
+
+            def __init__(self, days):
+                self._days = dict(days or {})
+
+            def is_holiday(self, day):
+                return enforce and day in self._days
+
+            def is_named_holiday(self, day):
+                return enforce and day in self._days
+
+            def get_holiday_name(self, day):
+                return self._days.get(day)
+
+        cfg = SimpleNamespace(sites=sites)
+        return WorkingCalendar(cfg, site, holidays=StubHolidays(holidays))
+
+    def _draft_on(self, repo, day, site="a"):
+        rep = Report(date=day, day="Mon", status=ReportStatus.DRAFT,
+                     telegram_user="creator-1", site_id=site,
+                     items=[ReportItem(contractor="C1", workers=5)])
+        return repo.add(rep)
+
+    def test_no_finalize_friday(self, repo, event_log_service, config):
+        self._draft_on(repo, "2026-09-11", site="a")  # a Friday
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-11",
+            site_id="a", calendar=self._cal("a")) == 0
+        assert repo.get_by_date("2026-09-11", site_id="a").status == \
+            ReportStatus.DRAFT
+
+    def test_no_finalize_holiday(self, repo, event_log_service, config):
+        self._draft_on(repo, "2026-09-14", site="a")  # a Monday
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-14",
+            site_id="a",
+            calendar=self._cal("a", holidays={"2026-09-14": "Test Day"})) == 0
+        assert repo.get_by_date("2026-09-14", site_id="a").status == \
+            ReportStatus.DRAFT
+
+    def test_no_finalize_site_off(self, repo, event_log_service, config):
+        from app.services.working_calendar import WorkingCalendar
+        from types import SimpleNamespace
+
+        cfg = SimpleNamespace(sites=[{"id": "a", "off_dates": ["2026-09-14"]}])
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        self._draft_on(repo, "2026-09-14", site="a")
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-14",
+            site_id="a", calendar=WorkingCalendar(cfg, "a")) == 0
+
+    def test_exceptional_workday_finalizes(self, repo, event_log_service, config):
+        from app.services.working_calendar import WorkingCalendar
+        from types import SimpleNamespace
+
+        cfg = SimpleNamespace(sites=[{"id": "a",
+                                      "working_dates": ["2026-09-11"]}])
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        self._draft_on(repo, "2026-09-11", site="a")  # Friday, but declared
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-11",
+            site_id="a", calendar=WorkingCalendar(cfg, "a")) == 1
+        assert repo.get_by_date("2026-09-11", site_id="a").status == \
+            ReportStatus.FINAL
+
+    def test_normal_day_preserved(self, repo, event_log_service, config):
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        self._draft_on(repo, "2026-09-14", site="a")  # a Monday
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-14",
+            site_id="a", calendar=self._cal("a")) == 1
+
+    def test_sites_use_own_calendars(self, repo, event_log_service, config):
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        self._draft_on(repo, "2026-09-11", site="a")  # Friday
+        self._draft_on(repo, "2026-09-11", site="b")
+        # site b works Fridays, site a does not: independent outcomes
+        from app.services.working_calendar import WorkingCalendar
+        from types import SimpleNamespace
+        cfg = SimpleNamespace(sites=[{"id": "a"}, {"id": "b", "weekend": []}])
+        out = wf.auto_finalize_sites(
+            ["a", "b"], lambda s: WorkingCalendar(cfg, s),
+            current_hour=17, current_minute=0, today_str="2026-09-11")
+        assert out == {"a": 0, "b": 1}
+        assert repo.get_by_date("2026-09-11", site_id="a").status == \
+            ReportStatus.DRAFT
+        assert repo.get_by_date("2026-09-11", site_id="b").status == \
+            ReportStatus.FINAL
+
+    def test_calendars_never_cross(self, repo, event_log_service, config):
+        """Swapped factories invert outcomes: proof each site used its own."""
+        from app.services.working_calendar import WorkingCalendar
+        from types import SimpleNamespace
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        self._draft_on(repo, "2026-09-11", site="a")
+        self._draft_on(repo, "2026-09-11", site="b")
+        cfg = SimpleNamespace(sites=[{"id": "a", "weekend": []}, {"id": "b"}])
+        out = wf.auto_finalize_sites(
+            ["a", "b"], lambda s: WorkingCalendar(cfg, s),
+            current_hour=17, current_minute=0, today_str="2026-09-11")
+        assert out == {"a": 1, "b": 0}
+
+    def test_missing_and_empty_unchanged(self, repo, event_log_service, config):
+        wf = ReportWorkflowService(repo, event_log_service, config)
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-11",
+            site_id="a", calendar=self._cal("a")) == 0
+        empty = Report(date="2026-09-11", day="Mon",
+                       status=ReportStatus.DRAFT, telegram_user="c",
+                       site_id="a", items=[])
+        repo.add(empty)
+        assert wf.auto_finalize_drafts(
+            current_hour=17, current_minute=0, today_str="2026-09-11",
+            site_id="a", calendar=self._cal("a")) == 0
+
+    def test_creator_cannot_self_approve(self, workflow, final_report,
+                                         event_log_repo):
+        """SoD enforced in domain: no mutation, no audit event."""
+        with pytest.raises(ReportLifecycleError) as exc:
+            workflow.approve_report(final_report, telegram_user="user123")
+        assert "own report" in str(exc.value).lower()
+        fresh = workflow._repo.get_by_id(final_report.id)
+        assert fresh.status == ReportStatus.FINAL
+        assert fresh.approved_by is None
+        events = event_log_repo.get_by_object("report", final_report.id)
+        assert not any(e.action == "report.approved" for e in events)
+
+    def test_creator_cannot_self_reject(self, workflow, final_report,
+                                        event_log_repo):
+        """Self-rejection refused: ask a reviewer instead."""
+        with pytest.raises(ReportLifecycleError) as exc:
+            workflow.reject_report(final_report, telegram_user="user123",
+                                   note="oops")
+        assert "own report" in str(exc.value).lower()
+        assert workflow._repo.get_by_id(final_report.id).status == \
+            ReportStatus.FINAL
+        events = event_log_repo.get_by_object("report", final_report.id)
+        assert not any(e.action == "report.rejected" for e in events)
+
+    def test_reviewer_approve_reject_allowed(self, workflow, final_report):
+        """Different reviewer may approve or reject (note required)."""
+        ok = workflow.approve_report(final_report, telegram_user="pm1")
+        assert ok.status == ReportStatus.APPROVED and ok.approved_by == "pm1"
+
+    def test_resubmit_preserves_rejection_history(self, workflow, final_report):
+        """Resubmission keeps rejected_by/reject_note for the audit trail."""
+        workflow.reject_report(final_report, telegram_user="pm1", note="fix B")
+        back = workflow.resubmit_report(final_report, telegram_user="user123")
+        assert back.status == ReportStatus.DRAFT
+        assert back.rejected_by == "pm1" and back.reject_note == "fix B"
+
+    async def test_scheduler_entry_uses_per_site_calendars(
+            self, repo, event_log_service, db_manager):
+        """Exact production path: scheduler loop honors each site's calendar."""
+        from datetime import date as _date
+        from types import SimpleNamespace
+
+        from app.models.config import AppConfig
+        from app.services.notification_manager import NotificationManager
+
+        today = _date.today().isoformat()
+        cfg = AppConfig(**{
+            "template": {"file": "t.ots", "tables_file": "t.ods"},
+            "date": {"cell": "B7", "day_cell": "B5"},
+            "table": {"start_row": 11, "columns": {}},
+            "output": {"pdf_folder": "x", "docs_folder": "y"},
+            "database": {"path": ":memory:"},
+            "tables": {"contractor_sheet": "c", "zones_sheet": "z"},
+            "lifecycle": {"auto_lock_hours": 24, "max_versions": 50,
+                          "auto_finalize_hour": 0, "auto_finalize_minute": 0},
+            "sites": [{"id": "a", "off_dates": [today]}, {"id": "b"}],
+        })
+        wf = ReportWorkflowService(repo, event_log_service, cfg)
+        for site in ("a", "b"):
+            rep = Report(date=today, day="Mon", status=ReportStatus.DRAFT,
+                         telegram_user="creator-1", site_id=site,
+                         items=[ReportItem(contractor="C1", workers=5)])
+            repo.add(rep)
+        app = SimpleNamespace(bot_data={"workflow_service": wf})
+        manager = NotificationManager(app, db_manager, cfg)
+        await manager._auto_finalize_today_drafts()
+        assert repo.get_by_date(today, site_id="a").status == \
+            ReportStatus.DRAFT
+        assert repo.get_by_date(today, site_id="b").status == \
+            ReportStatus.FINAL
+
+    # ------------------------------------------------------------------
     # Invalid Transitions
     # ------------------------------------------------------------------
 

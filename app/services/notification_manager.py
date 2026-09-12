@@ -454,9 +454,10 @@ class NotificationManager:
     async def _auto_finalize_today_drafts(self) -> None:
         """Auto-finalize today's draft reports at the configured deadline.
 
-        Retrieves the ``ReportWorkflowService`` from ``bot_data`` and calls
-        ``auto_finalize_drafts()`` to transition any pending draft reports
-        for today to FINAL status.
+        Retrieves the ``ReportWorkflowService`` from ``bot_data`` and runs
+        the explicit per-site loop: each configured site is evaluated
+        against ITS OWN WorkingCalendar, so a day off at one site never
+        suppresses (or triggers) finalization at another (3.1).
         """
         tracking_key = f"{self._last_check_date or 'unknown'}:auto_finalize"
         if tracking_key in self._sent_today:
@@ -468,9 +469,23 @@ class NotificationManager:
                 logger.warning("Workflow service not available for auto-finalize")
                 return
 
-            count = workflow.auto_finalize_drafts(telegram_user="system")
-            if count > 0:
-                logger.info("Auto-finalized %d draft report(s) at deadline", count)
+            from app.services.working_calendar import WorkingCalendar
+
+            raw_sites = getattr(self._config, "sites", None) or []
+            site_ids = [str(s.get("id")) for s in raw_sites
+                        if isinstance(s, dict) and s.get("id")]
+            if not site_ids:
+                from app.database import driver
+
+                site_ids = [driver.site_id()]
+            counts = workflow.auto_finalize_sites(
+                site_ids,
+                lambda s: WorkingCalendar(self._config, s),
+                telegram_user="system")
+            total = sum(counts.values())
+            if total > 0:
+                logger.info("Auto-finalized draft report(s) at deadline: %s",
+                            counts)
                 self._sent_today.add(tracking_key)
         except Exception as e:
             logger.error("Auto-finalize failed: %s", e, exc_info=True)
