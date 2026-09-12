@@ -215,13 +215,14 @@ async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     officer = await _officer(update, context, "salary")
     if officer is None:
         return
+    by, _ = officer
     parts = (update.message.text or "").split()
     if len(parts) != 3:
         await update.effective_message.reply_text("Usage: /salary <chat_id> <amount>")
         return
     try:
         amount = float(parts[2])
-        user = _payroll(context).set_salary(parts[1], amount)
+        user = _payroll(context).set_salary(parts[1], amount, set_by=by)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not set: {e}")
         return
@@ -247,7 +248,8 @@ async def handle_salary_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not text:
         await update.message.reply_text("Send CSV lines (or /cancel).")
         return
-    report = _payroll(context).import_salaries(text)
+    by, _ = _me(update)
+    report = _payroll(context).import_salaries(text, set_by=by)
     context.user_data.pop("state", None)
     await update.message.reply_text(
         f"Salaries: {report['updated']} updated, {report['unknown']} unknown, "

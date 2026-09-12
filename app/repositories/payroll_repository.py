@@ -6,7 +6,7 @@ from typing import Optional
 
 from app.database import driver
 from app.database.manager import DatabaseManager
-from app.models.payroll import PayrollLine, PayrollRun
+from app.models.payroll import PayrollLine, PayrollRun, PayrollRunStatus
 from app.repositories.base import BaseRepository
 from app.utils.logger import get_logger
 
@@ -73,6 +73,14 @@ class PayrollRepository(BaseRepository[PayrollRun]):
         return entity
 
     def delete(self, entity_id: int, site_id: str | None = None) -> bool:
+        """Delete a draft run and its lines. Refuses locked (exported) runs."""
+        run = self.get_by_id(entity_id, site_id=site_id)
+        if run is None:
+            return False
+        if run.status != PayrollRunStatus.DRAFT:
+            raise ValueError(
+                f"Refuse to delete {run.status} payroll run {entity_id}: "
+                "locked payroll is immutable (5A safety).")
         site = site_id or driver.site_id()
         self._db.execute("DELETE FROM payroll_lines WHERE run_id = ?", (entity_id,))
         cursor = self._db.execute(
@@ -95,10 +103,11 @@ class PayrollRepository(BaseRepository[PayrollRun]):
         cursor = self._db.execute(
             """INSERT INTO payroll_lines
                (run_id, chat_id, base_pay, ot_hours, ot_amount,
-                advances, deductions, net)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                advances, deductions, net, salary_history_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (line.run_id, line.chat_id, line.base_pay, line.ot_hours,
-             line.ot_amount, line.advances, line.deductions, line.net),
+             line.ot_amount, line.advances, line.deductions, line.net,
+             line.salary_history_id),
         )
         self._db.commit()
         line.id = cursor.lastrowid
@@ -145,6 +154,7 @@ class PayrollRepository(BaseRepository[PayrollRun]):
 
     @staticmethod
     def _row_to_line(row) -> PayrollLine:
+        keys = row.keys() if hasattr(row, "keys") else []
         return PayrollLine(
             id=row["id"],
             run_id=row["run_id"],
@@ -155,4 +165,6 @@ class PayrollRepository(BaseRepository[PayrollRun]):
             advances=row["advances"],
             deductions=row["deductions"],
             net=row["net"],
+            salary_history_id=(row["salary_history_id"]
+                               if "salary_history_id" in keys else None),
         )

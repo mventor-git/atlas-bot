@@ -64,6 +64,7 @@ def service():
         users.upsert(User(chat_id="111", role="normal_user"))
         users.upsert(User(chat_id="222", role="hr"))
         users.set_salary("111", 12000.0)
+        users.set_salary("222", 15000.0)
         yield PayrollService(PayrollRepository(manager), users)
         manager.close_all()
 

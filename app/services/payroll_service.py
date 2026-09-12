@@ -1,14 +1,15 @@
-"""Payroll service (020): monthly runs per ADR-009.
+"""Payroll service (020; 5A safety hardened): monthly runs per ADR-009.
 
 Formula: net = base + ot_hours * (base / standard_hours) * multiplier
          - advances - deductions, rounded to 2dp.
 Runs are editable until export; exported runs are immutable.
+Negative net is preserved as-is (business decision deferred to 5B).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.database import driver
 from app.models.payroll import PayrollLine, PayrollRun, PayrollRunStatus
@@ -17,6 +18,9 @@ from app.repositories.user_repository import UserRepository
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
+if TYPE_CHECKING:  # pragma: no cover
+    from app.repositories.membership_repository import MembershipRepository
+
 logger = get_logger(__name__)
 
 
@@ -24,9 +28,11 @@ class PayrollService:
     """Monthly payroll runs (handlers gate manage_payroll)."""
 
     def __init__(self, payroll_repo: PayrollRepository,
-                 user_repo: UserRepository) -> None:
+                 user_repo: UserRepository,
+                 membership_repo: MembershipRepository | None = None) -> None:
         self._repo = payroll_repo
         self._users = user_repo
+        self._memberships = membership_repo
 
     # --- math (pure) ---
 
@@ -34,7 +40,12 @@ class PayrollService:
     def compute_net(base_pay: float, ot_hours: float, standard_hours: float,
                     multiplier: float, advances: float,
                     deductions: float) -> tuple[float, float]:
-        """Return (ot_amount, net), rounded to 2dp. Rejects negatives."""
+        """Return (ot_amount, net), rounded to 2dp. Rejects negatives.
+
+        NOTE (5A): net itself may be negative when advances+deductions
+        exceed base+OT. This is preserved, NOT clamped — flooring is a
+        business-policy decision deferred to Stage 5B.
+        """
         for name, value in (("base_pay", base_pay), ("ot_hours", ot_hours),
                             ("advances", advances), ("deductions", deductions)):
             if value is None or float(value) < 0:
@@ -56,8 +67,11 @@ class PayrollService:
         """Open a draft run for YYYY-MM (one draft per period+site)."""
         import re
 
-        if not re.fullmatch(r"\d{4}-\d{2}", period or ""):
+        match = re.fullmatch(r"(\d{4})-(\d{2})", period or "")
+        if not match:
             raise DatabaseError("Period must be YYYY-MM.")
+        if not 1 <= int(match.group(2)) <= 12:
+            raise DatabaseError("Period month must be 01-12.")
         site = site_id or driver.site_id()
         if self._repo.get_by_period(period, site_id=site) is not None:
             raise DatabaseError(f"A run already exists for {period}.")
@@ -71,15 +85,32 @@ class PayrollService:
                  ot_hours: float = 0.0, advances: float = 0.0,
                  deductions: float = 0.0,
                  site_id: str | None = None) -> PayrollLine:
-        """Add a computed line to a draft run."""
+        """Add a computed line to a draft run.
+
+        Single funnel for every line-creation path: enforces draft state,
+        subject/site membership, one-line-per-employee, and salary
+        provenance before touching the DB (UNIQUE constraint backs it).
+        """
         run = self._draft(run_id, site_id)
+        self._check_subject(run.site_id, chat_id)
+        if any(str(existing.chat_id) == str(chat_id)
+               for existing in self._repo.lines_for(run.id)):
+            raise DatabaseError(
+                f"Run {run.id} already has a line for {chat_id}; "
+                "duplicate payroll lines are refused.")
+        history = self._users.current_salary_record(str(chat_id))
+        if history is None:
+            raise DatabaseError(
+                f"No salary history for {chat_id}; set the salary first "
+                "so the line can cite its provenance.")
         ot_amount, net = self.compute_net(
             base_pay, ot_hours, run.standard_hours,
             run.ot_multiplier, advances, deductions)
         return self._repo.add_line(PayrollLine(
             run_id=run.id, chat_id=chat_id, base_pay=float(base_pay),
             ot_hours=float(ot_hours), ot_amount=ot_amount,
-            advances=float(advances), deductions=float(deductions), net=net))
+            advances=float(advances), deductions=float(deductions),
+            net=net, salary_history_id=history["id"]))
 
     def update_line(self, line_id: int, run_id: int, base_pay: float,
                     ot_hours: float, advances: float, deductions: float,
@@ -145,12 +176,16 @@ class PayrollService:
         user = self._users.get_by_chat_id(chat_id)
         return user.monthly_salary if user else None
 
-    def set_salary(self, chat_id: str, amount: float):
-        return self._users.set_salary(chat_id, amount)
+    def set_salary(self, chat_id: str, amount: float,
+                   set_by: str | None = None,
+                   reason: str | None = None):
+        return self._users.set_salary(chat_id, amount, set_by=set_by,
+                                      reason=reason)
 
     # --- CSV import (chat_id,salary per line) ---
 
-    def import_salaries(self, csv_text: str) -> dict:
+    def import_salaries(self, csv_text: str,
+                        set_by: str | None = None) -> dict:
         """Set salaries from CSV text. Returns {updated, unknown, skipped}."""
         updated, unknown, skipped = 0, 0, 0
         for raw in (csv_text or "").strip().splitlines():
@@ -168,7 +203,8 @@ class PayrollService:
                 skipped += 1
                 continue
             try:
-                user = self._users.set_salary(chat_id, salary)
+                user = self._users.set_salary(chat_id, salary, set_by=set_by,
+                                              reason="csv import")
             except DatabaseError:
                 skipped += 1
                 continue
@@ -179,6 +215,29 @@ class PayrollService:
         return {"updated": updated, "unknown": unknown, "skipped": skipped}
 
     # --- internals ---
+
+    def _check_subject(self, site_id: str | None, subject_chat_id: str) -> None:
+        """Refuse cross-site line injection (5A).
+
+        The subject must hold an ACTIVE membership at the run's site.
+        Without a membership repo (legacy/dev wiring) fall back to the
+        legacy users.site_id signal when present; data with no site
+        signal at all is allowed through as before.
+        """
+        subject = str(subject_chat_id)
+        if self._memberships is not None:
+            sites = [m.site_id
+                     for m in self._memberships.active_for_user(subject)]
+            if site_id not in sites:
+                raise DatabaseError(
+                    f"User {subject} has no active membership at "
+                    f"`{site_id}`; cannot add them to this site's payroll.")
+            return
+        user = self._users.get_by_chat_id(subject)
+        if user is not None and user.site_id and user.site_id != site_id:
+            raise DatabaseError(
+                f"User {subject} belongs to `{user.site_id}`, not "
+                f"`{site_id}`; cannot add them to this site's payroll.")
 
     def _get(self, run_id: int, site_id: str | None) -> PayrollRun:
         run = self._repo.get_by_id(run_id, site_id=site_id or driver.site_id())

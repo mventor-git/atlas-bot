@@ -201,22 +201,56 @@ class UserRepository:
         ).fetchall()
         return [self._row_to_user(row) for row in rows]
 
-    def set_salary(self, chat_id: str, amount: float) -> Optional[User]:
-        """Set a user's contracted monthly base pay."""
+    def set_salary(self, chat_id: str, amount: float,
+                   set_by: str | None = None, reason: str | None = None,
+                   effective_from: str | None = None) -> Optional[User]:
+        """Set a user's contracted monthly base pay (5A: history-first).
+
+        Appends a NEW salary_history row (never rewrites history) and
+        refreshes users.monthly_salary as a current-value cache in the
+        same commit. Returns None for unknown users.
+        """
         if amount is None or float(amount) < 0:
             raise DatabaseError("Salary must be a non-negative number.")
         user = self.get_by_chat_id(chat_id)
         if user is None:
             return None
+        now = datetime.now().isoformat()
+        cursor = self._db.execute(
+            "INSERT INTO salary_history "
+            "(chat_id, amount, effective_from, set_by, set_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (chat_id, float(amount), effective_from or now,
+             set_by, now, reason),
+        )
+        history_id = cursor.lastrowid
         user.monthly_salary = float(amount)
-        user.updated_at = datetime.now().isoformat()
+        user.updated_at = now
         self._db.execute(
             "UPDATE users SET monthly_salary = ?, updated_at = ? WHERE chat_id = ?",
             (user.monthly_salary, user.updated_at, chat_id),
         )
         self._db.commit()
-        logger.info("User %s salary set to %s", chat_id, amount)
+        logger.info("User %s salary set to %s (history #%s by %s)",
+                    chat_id, amount, history_id, set_by)
         return user
+
+    def salary_history_for(self, chat_id: str) -> list[dict]:
+        """Append-only salary audit rows, oldest first."""
+        rows = self._db.execute(
+            "SELECT * FROM salary_history WHERE chat_id = ? ORDER BY id ASC",
+            (chat_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def current_salary_record(self, chat_id: str) -> dict | None:
+        """Latest salary_history row (the version new payroll lines cite)."""
+        row = self._db.execute(
+            "SELECT * FROM salary_history WHERE chat_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
     def delete(self, chat_id: str) -> bool:
         """Delete a user by chat ID.

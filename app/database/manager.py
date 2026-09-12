@@ -345,11 +345,27 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
     ot_amount REAL NOT NULL DEFAULT 0,
     advances REAL NOT NULL DEFAULT 0,
     deductions REAL NOT NULL DEFAULT 0,
-    net REAL NOT NULL
+    net REAL NOT NULL,
+    salary_history_id INTEGER REFERENCES salary_history(id),
+    UNIQUE (run_id, chat_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
 CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
+
+-- Salary history (5A safety): append-only audit of salary changes.
+-- users.monthly_salary remains as a current-value cache only.
+CREATE TABLE IF NOT EXISTS salary_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    effective_from TEXT NOT NULL,
+    set_by TEXT,
+    set_at TEXT NOT NULL,
+    reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_salary_history_user ON salary_history(chat_id, effective_from);
 
 -- Attendance days (026 day model; events stay the evidence layer)
 CREATE TABLE IF NOT EXISTS attendance_days (
@@ -726,11 +742,25 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
     ot_amount REAL NOT NULL DEFAULT 0,
     advances REAL NOT NULL DEFAULT 0,
     deductions REAL NOT NULL DEFAULT 0,
-    net REAL NOT NULL
+    net REAL NOT NULL,
+    salary_history_id INTEGER REFERENCES salary_history(id),
+    UNIQUE (run_id, chat_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
 CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
+
+CREATE TABLE IF NOT EXISTS salary_history (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    effective_from TEXT NOT NULL,
+    set_by TEXT,
+    set_at TEXT NOT NULL,
+    reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_salary_history_user ON salary_history(chat_id, effective_from);
 
 CREATE TABLE IF NOT EXISTS attendance_days (
     id SERIAL PRIMARY KEY,
@@ -860,6 +890,8 @@ class DatabaseManager:
         self._ensure_hr_requests_v2()
         # Salary column on pre-existing users tables (idempotent).
         self._ensure_users_salary()
+        # 5A payroll safety: line uniqueness + history provenance (idempotent).
+        self._ensure_payroll_safety()
         # Craftsman/helper split on pre-existing report_items (idempotent).
         self._ensure_report_items_split()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
@@ -956,6 +988,71 @@ class DatabaseManager:
         self.execute("ALTER TABLE users ADD COLUMN monthly_salary REAL")
         self.commit()
         logger.info("Added monthly_salary to users.")
+
+    def _ensure_payroll_safety(self) -> None:
+        """5A payroll safety backfill (idempotent, both backends).
+
+        1. salary_history_id on pre-existing payroll_lines (fresh DDL
+           already carries it; CREATE TABLE IF NOT EXISTS never alters).
+        2. UNIQUE(run_id, chat_id) on pre-existing payroll_lines via a
+           unique index (equivalent invariant; ALTER cannot add it).
+           Pre-existing duplicates fail loudly with the offending rows
+           listed so an operator resolves them instead of silently
+           keeping a double-pay vector.
+        3. One baseline salary_history row per employee that has a cached
+           salary but no history (effective_from = migration run; the
+           true historical date was never recorded and is NOT fabricated).
+        """
+        if self.table_exists("payroll_lines"):
+            if not self.column_exists("payroll_lines", "salary_history_id"):
+                self.execute(
+                    "ALTER TABLE payroll_lines "
+                    "ADD COLUMN salary_history_id INTEGER "
+                    "REFERENCES salary_history(id)"
+                )
+                self.commit()
+                logger.info("Added salary_history_id to payroll_lines.")
+            dupes = self.execute(
+                "SELECT run_id, chat_id, COUNT(*) AS n FROM payroll_lines "
+                "GROUP BY run_id, chat_id HAVING COUNT(*) > 1"
+            ).fetchall()
+            if dupes:
+                offenders = ", ".join(
+                    f"run {r['run_id']}/user {r['chat_id']} x{r['n']}"
+                    for r in dupes
+                )
+                raise DatabaseError(
+                    "Duplicate payroll lines block the 5A safety upgrade: "
+                    f"{offenders}. Keep one line per employee per run "
+                    "and restart."
+                )
+            self.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_line_unique "
+                "ON payroll_lines(run_id, chat_id)"
+            )
+            self.commit()
+        if self.table_exists("salary_history") and self.table_exists("users"):
+            from datetime import datetime
+
+            now = datetime.now().isoformat()
+            rows = self.execute(
+                "SELECT chat_id, monthly_salary FROM users "
+                "WHERE monthly_salary IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                exists = self.execute(
+                    "SELECT 1 FROM salary_history WHERE chat_id = ?",
+                    (row["chat_id"],),
+                ).fetchone()
+                if exists is None:
+                    self.execute(
+                        "INSERT INTO salary_history "
+                        "(chat_id, amount, effective_from, set_by, "
+                        " set_at, reason) VALUES (?, ?, ?, ?, ?, ?)",
+                        (row["chat_id"], row["monthly_salary"], now,
+                         "migration", now, "legacy salary baseline"),
+                    )
+            self.commit()
 
     def _ensure_report_items_split(self) -> None:
         """Add report_items.craftsmen/helpers on old DBs (idempotent)."""
