@@ -50,6 +50,8 @@ def make_auth(role="normal_user"):
     auth.has_capability.side_effect = (
         lambda chat_id, capability, site_id=None: capability in caps.for_role(role)
     )
+    auth.resolve_active_site.side_effect = (lambda chat_id, session_site=None: session_site or 'default')
+    auth.sites_for_user.return_value = ['default']
     return auth
 
 
@@ -177,6 +179,10 @@ class TestApprovalCallbacks:
         pm = make_context(make_auth("project_manager"), service, pm_data)
         auth = pm.bot_data["authorization_service"]
         auth.get_role.side_effect = lambda cid: "hr" if cid == "999" else "project_manager"
+        from app.auth import capabilities as caps
+        auth.has_capability.side_effect = (
+            lambda chat_id, capability, site_id=None: capability in caps.for_role(
+                "hr" if chat_id == "999" else "project_manager"))
         await hr_handlers.handle_hr_callback(
             make_update(222, callback_data=f"hr_delegate:{req.id}"), pm)
         assert pm_data["state"] == "awaiting_delegate_target"

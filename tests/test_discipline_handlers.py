@@ -47,6 +47,8 @@ def make_auth(role="hr"):
 
     auth = MagicMock(spec=AuthorizationService)
     auth.get_role.return_value = role
+    auth.resolve_active_site.side_effect = (lambda chat_id, session_site=None: session_site or 'default')
+    auth.sites_for_user.return_value = ['default']
     auth.has_capability.side_effect = (
         lambda chat_id, cap, site_id=None: cap in caps.for_role(role))
     return auth

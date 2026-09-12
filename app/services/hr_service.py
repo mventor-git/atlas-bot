@@ -363,6 +363,15 @@ class HRService:
             return own + [r for r in queued if r.id not in seen]
         return own
 
+    def get(self, request_id: int,
+            site_id: str | None = None) -> Optional[HRRequest]:
+        """Public site-scoped fetch (None when off-site); no raise."""
+        return self._repo.get_by_id(request_id, site_id=site_id)
+
+    def pending(self, site_id: str | None = None) -> list[HRRequest]:
+        """Public site queue of pending confirmations/decisions."""
+        return self._repo.list_pending(site_id=site_id)
+
     def history_for_user(
         self, chat_id: str, window: str = "month",
         site_id: str | None = None, today: str = "",

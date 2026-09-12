@@ -1,4 +1,4 @@
-"""Case handlers: file, queues, review/resolve/appeal (015, P6b)."""
+"""Case handlers: file, queues, review/resolve/appeal (015; Phase 1 site-scoped)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from app.bot import site_session
 from app.models.case import SUBMIT_CAPABILITY, Case, CaseStatus, CaseType
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -40,19 +41,12 @@ def _cases(context: ContextTypes.DEFAULT_TYPE):
     return context.bot_data["case_service"]
 
 
-def _can_review(chat_id: str, context, case_type: str) -> bool:
-    return _auth(context).has_capability(chat_id, REVIEW_CAPS[case_type][0])
+def _can_review(chat_id: str, context, case_type: str, site: str) -> bool:
+    return _auth(context).has_capability(chat_id, REVIEW_CAPS[case_type][0], site)
 
 
-def _can_resolve(chat_id: str, context, case_type: str) -> bool:
-    return _auth(context).has_capability(chat_id, REVIEW_CAPS[case_type][1])
-
-
-def _can_review_any(chat_id: str, context) -> bool:
-    return any(
-        _auth(context).has_capability(chat_id, caps[0])
-        for caps in REVIEW_CAPS.values()
-    )
+def _can_resolve(chat_id: str, context, case_type: str, site: str) -> bool:
+    return _auth(context).has_capability(chat_id, REVIEW_CAPS[case_type][1], site)
 
 
 async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str) -> None:
@@ -75,15 +69,15 @@ def _render(case: Case) -> str:
     return "\n".join(lines)
 
 
-def _queue_buttons(chat_id: str, context, case: Case):
+def _queue_buttons(chat_id: str, context, case: Case, site: str):
     buttons = []
     if case.status in (CaseStatus.FILED, CaseStatus.APPEALED) and _can_review(
-            chat_id, context, case.case_type):
+            chat_id, context, case.case_type, site):
         buttons.append(
             [InlineKeyboardButton("Take into review",
                                   callback_data=f"case_review:{case.id}")])
     if case.status in (CaseStatus.UNDER_REVIEW, CaseStatus.APPEALED) and _can_resolve(
-            chat_id, context, case.case_type):
+            chat_id, context, case.case_type, site):
         buttons.append(
             [InlineKeyboardButton("Resolve",
                                   callback_data=f"case_resolve:{case.id}")])
@@ -95,10 +89,15 @@ def _queue_buttons(chat_id: str, context, case: Case):
 async def _start_file(update: Update, context: ContextTypes.DEFAULT_TYPE,
                       kind: str) -> None:
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, SUBMIT_CAPABILITY[kind]):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=f"case:{kind}",
+                                    hint=f"Press /{kind} again.")
+        return
+    if not _auth(context).has_capability(chat_id, SUBMIT_CAPABILITY[kind], site):
         await update.effective_message.reply_text("Your account cannot file this.")
         return
-    context.user_data["case_flow"] = {"type": kind}
+    context.user_data["case_flow"] = {"type": kind, "site": site}
     context.user_data["state"] = "awaiting_case_summary"
     await update.effective_message.reply_text(
         f"Describe your {kind} in one message (or /cancel).")
@@ -126,16 +125,17 @@ async def handle_case_summary(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Send the summary as text (or /cancel).")
         return
     chat_id, _ = _me(update)
-    kind = (context.user_data.get("case_flow") or {}).get("type")
+    flow = context.user_data.get("case_flow") or {}
+    kind, site = flow.get("type"), flow.get("site")
     try:
-        case = _cases(context).file(chat_id, kind, text)
+        case = _cases(context).file(chat_id, kind, text, site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not file: {e}")
         return
     context.user_data.pop("case_flow", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(
-        f"Filed {kind} `#{case.id}` - a reviewer will triage it.",
+        f"Filed {kind} `#{case.id}` at `{site}` - a reviewer will triage it.",
         parse_mode="Markdown")
 
 
@@ -143,11 +143,14 @@ async def handle_case_summary(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def mycases_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id, _ = _me(update)
-    rows = _cases(context)._repo.for_reporter(chat_id)
+    service = _cases(context)
+    rows = []
+    for site in _auth(context).sites_for_user(chat_id):
+        rows.extend(service.list_mine(chat_id, site_id=site))
     if not rows:
         await update.effective_message.reply_text("You have no cases.")
         return
-    for case in rows[:10]:
+    for case in sorted(rows, key=lambda c: c.created_at)[:10]:
         markup = None
         if case.status == CaseStatus.RESOLVED and str(case.reporter_chat_id) == chat_id:
             markup = InlineKeyboardMarkup([[
@@ -159,17 +162,24 @@ async def mycases_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def cases_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id, _ = _me(update)
-    if not _can_review_any(chat_id, context):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="cases",
+                                    hint="Press /cases again.")
+        return
+    auth = _auth(context)
+    if not any(auth.has_capability(chat_id, caps[0], site)
+               for caps in REVIEW_CAPS.values()):
         await update.effective_message.reply_text("Review queue is for reviewers only.")
         return
-    rows = _cases(context)._repo.open_cases()
+    rows = _cases(context).open_cases(site_id=site)
     if not rows:
         await update.effective_message.reply_text("Review queue is empty.")
         return
     for case in rows[:10]:
         await update.effective_message.reply_text(
             _render(case), parse_mode="Markdown",
-            reply_markup=_queue_buttons(chat_id, context, case))
+            reply_markup=_queue_buttons(chat_id, context, case, site))
 
 
 # --- callbacks ---
@@ -181,6 +191,12 @@ async def handle_case_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     chat_id, _ = _me(update)
     service = _cases(context)
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=data,
+                                    hint="Press the button again.")
+        return
+
     parts = data.split(":")
     if len(parts) != 2:
         return
@@ -191,12 +207,12 @@ async def handle_case_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if action == "case_review":
-        case = service._repo.get_by_id(case_id)
-        if case is None or not _can_review(chat_id, context, case.case_type):
+        case = service.get(case_id, site_id=site)
+        if case is None or not _can_review(chat_id, context, case.case_type, site):
             await query.edit_message_text("Review needs a reviewer account.")
             return
         try:
-            case = service.review(case_id, chat_id)
+            case = service.review(case_id, chat_id, site_id=site)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not review: {e}")
             return
@@ -205,19 +221,21 @@ async def handle_case_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await _notify(context, case.reporter_chat_id,
                       f"Your {case.case_type} `#{case.id}` is under review.")
     elif action == "case_resolve":
-        case = service._repo.get_by_id(case_id)
-        if case is None or not _can_resolve(chat_id, context, case.case_type):
+        case = service.get(case_id, site_id=site)
+        if case is None or not _can_resolve(chat_id, context, case.case_type, site):
             await query.edit_message_text("Resolution needs a reviewer account.")
             return
         context.user_data["case_resolve_id"] = case_id
+        context.user_data["case_resolve_site"] = site
         context.user_data["state"] = "awaiting_case_note"
         await query.edit_message_text("Send the resolution note.")
     elif action == "case_appeal":
-        case = service._repo.get_by_id(case_id)
+        case = service.get(case_id, site_id=site)
         if case is None or str(case.reporter_chat_id) != chat_id:
             await query.edit_message_text("Only the filer may appeal this case.")
             return
         context.user_data["case_appeal_id"] = case_id
+        context.user_data["case_appeal_site"] = site
         context.user_data["state"] = "awaiting_case_appeal"
         await query.edit_message_text("Send your appeal note.")
 
@@ -230,11 +248,13 @@ async def handle_case_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id, _ = _me(update)
     try:
         case = _cases(context).resolve(
-            context.user_data.get("case_resolve_id"), chat_id, note)
+            context.user_data.get("case_resolve_id"), chat_id, note,
+            site_id=context.user_data.get("case_resolve_site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not resolve: {e}")
         return
     context.user_data.pop("case_resolve_id", None)
+    context.user_data.pop("case_resolve_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Resolved case `#{case.id}`.",
                                     parse_mode="Markdown")
@@ -250,11 +270,13 @@ async def handle_case_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id, _ = _me(update)
     try:
         case = _cases(context).appeal(
-            context.user_data.get("case_appeal_id"), chat_id, note)
+            context.user_data.get("case_appeal_id"), chat_id, note,
+            site_id=context.user_data.get("case_appeal_site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not appeal: {e}")
         return
     context.user_data.pop("case_appeal_id", None)
+    context.user_data.pop("case_appeal_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Appealed case `#{case.id}` - back to review.",
                                     parse_mode="Markdown")

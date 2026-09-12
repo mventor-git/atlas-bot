@@ -106,6 +106,23 @@ class MembershipRepository(BaseRepository[SiteMembership]):
         self.update(existing)
         return True
 
+    def revoke(self, chat_id: str, site_id: str) -> bool:
+        """Remove a membership entirely (a fresh grant is required)."""
+        existing = self.find(chat_id, site_id)
+        if existing is None:
+            return False
+        return self.delete(existing.id)
+
+    def active_chat_ids(self, site_id: str | None = None) -> list[str]:
+        """Chat IDs holding an ACTIVE membership at a site (Phase 1)."""
+        rows = self._db.execute(
+            """SELECT chat_id FROM user_site_memberships
+               WHERE site_id = ? AND status = 'active'
+               ORDER BY chat_id ASC""",
+            (site_id or driver.site_id(),),
+        ).fetchall()
+        return [str(r["chat_id"]) for r in rows]
+
     def find(self, chat_id: str, site_id: str) -> Optional[SiteMembership]:
         """Active-or-not membership row for a user+site pair."""
         row = self._db.execute(

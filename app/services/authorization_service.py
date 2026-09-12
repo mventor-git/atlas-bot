@@ -192,15 +192,27 @@ class AuthorizationService:
 
     def has_capability(self, chat_id: str, capability: str,
                        site_id: str | None = None) -> bool:
-        """Capability check: membership grants, else role defaults.
+        """Capability check with EXPLICIT Phase 1 semantics.
 
-        Args:
-            chat_id: Telegram chat ID.
-            capability: Registry name (unknown names always deny).
-            site_id: Tenant site (defaults to this bot's SITE_ID).
+        Resolution order for (chat_id, site, capability):
+        1. Unknown capability name -> deny (always, everywhere).
+        2. Role pending/rejected   -> deny.
+        3. Membership row (user_site_memberships is the ONLY authority):
+           - suspended            -> deny (other sites unaffected)
+           - missing              -> deny (must be granted; no global role
+                                      bypass — revoked = denied)
+           - active + explicit caps non-empty -> allow ONLY if capability is
+             in that list. Grants are site-scoped OVERRIDES, not additions;
+             they cannot be combined with role defaults (documented in
+             docs/AUTHZ.md).
+           - active + empty caps  -> role defaults (the role is a bundle
+             label that only matters when no explicit grants exist).
+        4. No membership repo wired (unit/dev mode) -> role defaults.
 
-        Returns:
-            True only with an active membership grant or a role default.
+        Capability expiry and HQ-wide grants are NOT modeled (v1 simple);
+        an HQ-wide power = one membership row per site.
+        Revoking a capability = grant with the reduced list.
+        A role change only affects sites with empty (default) grants.
         """
         from app.auth import capabilities as caps
         from app.database import driver
@@ -246,6 +258,55 @@ class AuthorizationService:
         if self._memberships is None:
             return []
         return [m.site_id for m in self._memberships.active_for_user(chat_id)]
+
+    # --- Membership administration (Phase 1; source of truth) ---
+
+    def grant_membership(self, chat_id: str, site_id: str,
+                         capabilities: list | None = None):
+        """Grant/refresh an active membership; unknown caps rejected here."""
+        if self._memberships is None:
+            return None
+        from app.auth import capabilities as caps
+
+        bad = [c for c in (capabilities or []) if not caps.is_known(c)]
+        if bad:
+            raise ValueError(f"Unknown capabilities: {', '.join(bad)}")
+        if not site_id or not str(site_id).strip():
+            raise ValueError("Site ID required.")
+        return self._memberships.grant(chat_id, str(site_id).strip(),
+                                       list(capabilities or []))
+
+    def find_membership(self, chat_id: str, site_id: str):
+        """Any membership row (active or suspended) for admin reporting."""
+        if self._memberships is None:
+            return None
+        return self._memberships.find(chat_id, site_id)
+
+    def suspend_membership(self, chat_id: str, site_id: str) -> bool:
+        """Suspend one site membership (immediate denial there, keeps caps)."""
+        if self._memberships is None:
+            return False
+        return self._memberships.suspend(chat_id, site_id)
+
+    def revoke_membership(self, chat_id: str, site_id: str) -> bool:
+        """Delete a site membership (must be re-granted to access again)."""
+        if self._memberships is None:
+            return False
+        return self._memberships.revoke(chat_id, site_id)
+
+    def chat_ids_for_site(self, site_id: str,
+                          capability: str | None = None) -> list[str]:
+        """Active members of a site, optionally narrowed by capability.
+
+        Replaces legacy users.site_id targeting (notifications/HR boards):
+        suspended/revoked members drop out immediately.
+        """
+        if self._memberships is None:
+            return []
+        members = self._memberships.active_chat_ids(site_id)
+        if capability is None:
+            return members
+        return [c for c in members if self.has_capability(c, capability, site_id)]
 
     def migrate_memberships(self) -> int:
         """Backfill memberships from legacy users.site_id. Returns rows created."""
@@ -325,8 +386,10 @@ class AuthorizationService:
         if updated is not None and self._memberships is not None:
             from app.database import driver
 
-            site = (updated.site_id or "").strip() or driver.site_id()
-            self._memberships.grant(chat_id, site, [])
+            # Phase 1: memberships are the source of truth. Approval binds
+            # the deployment ORIGIN site; HQ moves people with /hr_member.
+            # users.site_id is legacy display only and never read here.
+            self._memberships.grant(chat_id, driver.site_id(), [])
         return updated
 
     def reject_user(self, chat_id: str, rejected_by: str) -> Optional[User]:

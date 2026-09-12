@@ -1,4 +1,4 @@
-"""HR site board tests (ticket-006-E): mocked Telegram, real repos + engine."""
+"""HR site board tests (006-E; Phase 1: real AuthorizationService stack)."""
 
 import tempfile
 from datetime import date
@@ -14,8 +14,12 @@ from app.bot.handlers import hr as hr_handlers
 from app.database.manager import DatabaseManager
 from app.models.config import AppConfig
 from app.models.database import Report, ReportItem, ReportStatus, User
+from app.repositories.membership_repository import MembershipRepository
 from app.repositories.report_repository import ReportRepository
 from app.repositories.user_repository import UserRepository
+from app.services.authorization_service import AuthorizationService
+
+OPERATOR = "999"   # superadmin chat id in this fixture
 
 
 def make_update(user_id=999, callback_data=None, text=""):
@@ -55,25 +59,30 @@ def env(tmp_path=None):
     raw["sites"] = [{"id": "main", "name": "Main Site"},
                     {"id": "hq", "name": "Headquarters"}]
     config = AppConfig(**raw)
-    auth = MagicMock()
+    users = UserRepository(manager)
+    members = MembershipRepository(manager)
+    auth = AuthorizationService(user_repo=users, super_admin_chat_id=OPERATOR,
+                                admin_chat_ids=[], membership_repo=members)
     ctx = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     ctx.bot_data = {
         "authorization_service": auth,
         "report_repository": ReportRepository(manager),
-        "user_repository": UserRepository(manager),
+        "user_repository": users,
         "app_config": config,
     }
     ctx.user_data = {}
     ctx.bot = MagicMock()
     ctx.bot.send_message = AsyncMock()
-    yield {"ctx": ctx, "auth": auth, "manager": manager,
-           "reports": ctx.bot_data["report_repository"],
-           "users": ctx.bot_data["user_repository"]}
+    members.grant(OPERATOR, "default", [])   # origin-site membership for gates
+    yield {"ctx": ctx, "auth": auth, "manager": manager, "members": members,
+           "reports": ctx.bot_data["report_repository"], "users": users}
     manager.close_all()
 
 
 def _role(ctx, role):
-    ctx.bot_data["authorization_service"].get_role.return_value = role
+    """Give the OPERATOR this role (superadmin shortcut aside when applicable)."""
+    ctx.bot_data["user_repository"].upsert(
+        User(chat_id=OPERATOR, role=role, site_id="default"))
 
 
 def _report(site):
@@ -93,12 +102,13 @@ class TestSiteBoard:
         upd = make_update(999, text="/hr_sites")
         await hr_handlers.sites_command(upd, env["ctx"])
         upd.effective_message.reply_text.assert_called_once()
-        args, kwargs = upd.effective_message.reply_text.call_args
-        assert "Main Site" in str(kwargs.get("reply_markup", "")) or True
+        assert "Pick a site" in upd.effective_message.reply_text.call_args[0][0]
 
     async def test_sites_refused_for_normal(self, env):
         _role(env["ctx"], "normal_user")
         upd = make_update(111, text="/hr_sites")
+        upd.effective_user.id = 111
+        env["members"].grant("111", "default", [])
         await hr_handlers.sites_command(upd, env["ctx"])
         text = upd.effective_message.reply_text.call_args[0][0]
         assert "HR only" in text
@@ -118,6 +128,13 @@ class TestSiteBoard:
         text = upd.callback_query.edit_message_text.call_args[0][0]
         assert "no report" in text
 
+    async def test_site_rejects_unknown_site(self, env):
+        _role(env["ctx"], "hr")
+        upd = make_update(999, callback_data="hr_site:evil")
+        await hr_handlers.handle_hr_callback(upd, env["ctx"])
+        assert upd.callback_query.edit_message_text.call_args[0][0] == \
+            "Unknown site."
+
     async def test_print_queues_pdf(self, env):
         _role(env["ctx"], "hr")
         env["reports"].add(_report("main"))
@@ -126,20 +143,23 @@ class TestSiteBoard:
         text = upd.callback_query.edit_message_text.call_args[0][0]
         assert "Queued for print" in text
 
-    async def test_notify_targets_site_only(self, env):
+    async def test_notify_targets_memberships_only(self, env):
         _role(env["ctx"], "hr")
         users = env["users"]
         users.upsert(_user("111", "normal_user", "main"))
         users.upsert(_user("112", "normal_user", "main"))
-        users.upsert(_user("113", "pending", "main"))
         users.upsert(_user("114", "normal_user", "hq"))
+        users.upsert(_user("115", "normal_user", "main"))   # legacy tag, no membership
+        env["members"].grant("111", "main", [])
+        env["members"].grant("112", "main", [])
+        env["members"].grant("114", "hq", [])
         upd = make_update(999, callback_data="hr_notify:main")
         await hr_handlers.handle_hr_callback(upd, env["ctx"])
         sent_to = sorted(
             call.kwargs["chat_id"]
             for call in env["ctx"].bot.send_message.call_args_list
         )
-        assert sent_to == [111, 112]
+        assert sent_to == [111, 112]          # 115 legacy-tagged excluded
         text = upd.callback_query.edit_message_text.call_args[0][0]
         assert "2/2" in text
 
@@ -151,9 +171,21 @@ class TestSiteBoard:
         text = upd.effective_message.reply_text.call_args[0][0]
         assert "Main Site" in text and "Headquarters" in text
 
-    async def test_setsite(self, env):
+    async def test_member_grant_validates_site(self, env):
         _role(env["ctx"], "hr")
-        env["users"].upsert(_user("111", "normal_user", "main"))
-        upd = make_update(999, text="/hr_setsite 111 hq")
-        await hr_handlers.set_site_command(upd, env["ctx"])
-        assert env["users"].get_by_chat_id("111").site_id == "hq"
+        upd = make_update(999, text="/hr_member grant 111 main")
+        upd.message.text = "/hr_member grant 111 main"
+        await hr_handlers.member_command(upd, env["ctx"])
+        assert env["members"].find("111", "main") is not None
+        bad = make_update(999, text="/hr_member grant 111 nowhere")
+        bad.message.text = "/hr_member grant 111 nowhere"
+        await hr_handlers.member_command(bad, env["ctx"])
+        assert "Unknown site" in bad.effective_message.reply_text.call_args[0][0]
+
+    async def test_member_non_superadmin_refused(self, env):
+        upd = make_update(111, text="/hr_member grant 112 main")
+        upd.effective_user.id = 111
+        upd.message.text = "/hr_member grant 112 main"
+        await hr_handlers.member_command(upd, env["ctx"])
+        assert "superadmin" in upd.effective_message.reply_text.call_args[0][0]
+        assert env["members"].find("112", "main") is None
