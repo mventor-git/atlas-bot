@@ -3,6 +3,7 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardMarkup, InputFile
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from app.services.daily_dashboard_service import DailyDashboardService, DashboardData
+from app.bot import site_session
 from app.repositories.report_repository import ReportRepository
 from app.bot.keyboards import (
     main_menu_keyboard, report_actions_keyboard, confirmation_keyboard,
@@ -14,6 +15,7 @@ from app.services.one_click_yesterday_service import OneClickYesterdayService
 from app.services.report_workflow_service import ReportWorkflowService
 from app.services.authorization_service import AuthorizationService
 from app.services.audit_service import AuditService
+from app.utils.exceptions import ReportLifecycleError
 from app.models.database import Report, ReportStatus
 from app.utils.logger import get_logger
 
@@ -213,8 +215,13 @@ async def fresh_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     today = date.today().isoformat()
 
     try:
+        site = site_session.resolve_site(update, context)
+        if site is None:
+            await site_session.ask_site(update, context, resume="fresh",
+                                        hint="Press /fresh again.")
+            return
         repo: ReportRepository = context.bot_data["report_repository"]
-        report = repo.get_by_date(today)
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None:
             await update.message.reply_text(
@@ -292,7 +299,12 @@ async def dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _handle_revert_last(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                query, repo, today: str, telegram_user: str) -> None:
     """Revert the last contractor entry added to today's draft."""
-    report = repo.get_by_date(today)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="revert",
+                                    hint="Press the button again.")
+        return
+    report = repo.get_by_date(today, site_id=site)
     if report is None:
         await query.edit_message_text("No report found for today.")
         return
@@ -342,7 +354,12 @@ async def _handle_revert_last(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _handle_revert_report(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                  query, repo, today: str, telegram_user: str) -> None:
     """Revert the entire report for today (admin only)."""
-    report = repo.get_by_date(today)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="revert",
+                                    hint="Press the button again.")
+        return
+    report = repo.get_by_date(today, site_id=site)
     if report is None:
         await query.edit_message_text("No report found for today.")
         return
@@ -421,6 +438,11 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text("Report repository not available.")
         return
     today = date.today().isoformat()
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=f"menu:{data}",
+                                    hint="Press the button again.")
+        return
 
     if data == "dashboard":
         await dashboard_callback(update, context)
@@ -544,7 +566,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             return
 
         try:
-            report = repo.get_by_date(today)
+            report = repo.get_by_date(today, site_id=site)
 
             if report is None:
                 await query.edit_message_text(
@@ -587,7 +609,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
 
     elif data in ("preview_pdf", "download_pdf"):
         try:
-            report = repo.get_by_date(today)
+            report = repo.get_by_date(today, site_id=site)
 
             if report is None or not report.items:
                 await query.edit_message_text(
@@ -635,7 +657,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             await query.edit_message_text("You don't have permission to finalize reports.")
             return
 
-        report = repo.get_by_date(today)
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None:
             await query.edit_message_text("No report found for today.", parse_mode="Markdown")
@@ -668,14 +690,14 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             await query.edit_message_text("You don't have permission to lock reports.")
             return
 
-        report = repo.get_by_date(today)
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None:
             await query.edit_message_text("No report found for today.", parse_mode="Markdown")
-        elif not report.is_final:
+        elif not report.is_approved:
             await query.edit_message_text(
-                f"Report must be *final* before locking (currently: *{report.status.value}*).\n"
-                f"Finalize it first.",
+                f"Report must be *approved* before locking (currently: *{report.status.value}*).\n"
+                f"Ask a reviewer to /approve it first.",
                 parse_mode="Markdown",
             )
         else:
@@ -697,9 +719,80 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             return
         await unlock_via_callback(update, context)
 
+    elif data == "approve_report":
+        gated = await _review_gate(update, context)
+        if gated is None:
+            if site_session.resolve_site(update, context) is not None:
+                await query.edit_message_text("Approval needs a reviewer grant.")
+            return
+        chat_id, site = gated
+        report = repo.get_by_date(today, site_id=site)
+        if report is None:
+            await query.edit_message_text("No report found for today.")
+            return
+        workflow: ReportWorkflowService = context.bot_data["workflow_service"]
+        try:
+            report = workflow.approve_report(report, chat_id)
+        except ReportLifecycleError as e:
+            await query.edit_message_text(f"Could not approve: {e}")
+            return
+        await query.edit_message_text(
+            f"\u2705 *Report Approved*\n\nLock it with /lock.",
+            reply_markup=report_actions_keyboard(report.status.value,
+                                                 role=role),
+            parse_mode="Markdown",
+        )
+    elif data == "reject_report":
+        gated = await _review_gate(update, context)
+        if gated is None:
+            if site_session.resolve_site(update, context) is not None:
+                await query.edit_message_text("Rejection needs a reviewer grant.")
+            return
+        chat_id, site = gated
+        report = repo.get_by_date(today, site_id=site)
+        if report is None:
+            await query.edit_message_text("No report found for today.")
+            return
+        if not report.is_final:
+            await query.edit_message_text(
+                f"Only a *final* report can be rejected (currently: *{report.status.value}*).",
+                parse_mode="Markdown",
+            )
+            return
+        context.user_data["report_reject_id"] = report.id
+        context.user_data["report_reject_site"] = site
+        context.user_data["state"] = "awaiting_report_reject_note"
+        await query.edit_message_text("Send the rejection note as text.")
+    elif data == "resubmit_report":
+        chat_id = telegram_user
+        site = site_session.resolve_site(update, context)
+        if site is None:
+            await site_session.ask_site(update, context, resume="menu:resubmit",
+                                        hint="Press the button again.")
+            return
+        report = repo.get_by_date(today, site_id=site)
+        if report is None:
+            await query.edit_message_text("No report found for today.")
+            return
+        if str(report.telegram_user) != chat_id and not auth.has_capability(
+                chat_id, "approve_daily_report", site):
+            await query.edit_message_text("Only the creator or a reviewer can resubmit.")
+            return
+        workflow = context.bot_data["workflow_service"]
+        try:
+            report = workflow.resubmit_report(report, chat_id)
+        except ReportLifecycleError as e:
+            await query.edit_message_text(f"Could not resubmit: {e}")
+            return
+        await query.edit_message_text(
+            f"\U0001f4cb *Report Resubmitted*\n\nEdit it, then /finalize again.",
+            reply_markup=report_actions_keyboard(report.status.value, role=role),
+            parse_mode="Markdown",
+        )
+
     elif data == "view_report":
         try:
-            report = repo.get_by_date(today)
+            report = repo.get_by_date(today, site_id=site)
 
             if report is None:
                 await query.edit_message_text(
@@ -838,7 +931,12 @@ async def handle_confirmation_callback(update: Update, context: ContextTypes.DEF
         action = data.replace("confirm:", "")
         repo: ReportRepository = context.bot_data["report_repository"]
         today = date.today().isoformat()
-        report = repo.get_by_date(today)
+        site = site_session.resolve_site(update, context)
+        if site is None:
+            await site_session.ask_site(update, context, resume=f"confirm:{action}",
+                                        hint="Press the button again.")
+            return
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None:
             await query.edit_message_text("Report not found. It may have been deleted.")
@@ -916,9 +1014,14 @@ async def unlock_via_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     role = _get_role(context, telegram_user)
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="unlock",
+                                    hint="Press the button again.")
+        return
     today = date.today().isoformat()
     repo: ReportRepository = context.bot_data["report_repository"]
-    report = repo.get_by_date(today)
+    report = repo.get_by_date(today, site_id=site)
 
     if report is None:
         await query.edit_message_text("No report found for today.", parse_mode="Markdown")
@@ -1354,7 +1457,7 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
 
 
 async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /view command - view today's report."""
+    """Handle /view command - view today's report at the active site."""
     from app.bot.handlers._authz import require_view
 
     if not await require_view(update, context):
@@ -1363,11 +1466,16 @@ async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     role = _get_role(context, telegram_user)
     auth = _get_auth(context)
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="view",
+                                    hint="Press /view again.")
+        return
     today = date.today().isoformat()
 
     try:
         repo: ReportRepository = context.bot_data["report_repository"]
-        report = repo.get_by_date(today)
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None:
             await update.message.reply_text(
@@ -1387,8 +1495,12 @@ async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             items_text += f"\n{i}. {item.contractor}{zone_text}: {w} workers{detail_text}"
 
         status_icon = "\U0001f512" if report.is_locked else "\u2705" if report.is_final else "\U0001f4cb"
+        if report.status == ReportStatus.APPROVED:
+            status_icon = "\u2705"
+        elif report.status == ReportStatus.REJECTED:
+            status_icon = "\U0001f501"
         text = (
-            f"{status_icon} *Report: {report.date}*\n\n"
+            f"{status_icon} *Report: {report.date}* (`{site}`)\n\n"
             f"Day: {report.day}\n"
             f"Status: *{report.status.value}*\n"
             f"Contractors: {len(report.items)}\n"
@@ -1397,6 +1509,12 @@ async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         if report.finalized_at:
             text += f"\n\nFinalized: {report.finalized_at[:10]}"
+        if report.approved_by:
+            text += f"\nApproved by: `{report.approved_by}`"
+        if report.status == ReportStatus.REJECTED:
+            text += f"\nRejected by: `{report.rejected_by or '?'}`"
+            text += f"\nReason: {report.reject_note or '-'}"
+            text += "\nResubmit with /resubmit after fixing."
         if report.locked_at:
             text += f"\nLocked: {report.locked_at[:10]}"
 
@@ -1415,11 +1533,16 @@ async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not await require_view(update, context):
         return
     telegram_user = str(update.effective_user.id)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="preview",
+                                    hint="Press /preview again.")
+        return
     today = date.today().isoformat()
 
     try:
         repo: ReportRepository = context.bot_data["report_repository"]
-        report = repo.get_by_date(today)
+        report = repo.get_by_date(today, site_id=site)
 
         if report is None or not report.items:
             await update.message.reply_text(
@@ -1454,7 +1577,7 @@ async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def finalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /finalize command - finalize current report."""
+    """Handle /finalize command - finalize current report at the active site."""
     telegram_user = str(update.effective_user.id)
     auth = _get_auth(context)
 
@@ -1462,9 +1585,14 @@ async def finalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("You don't have permission to finalize reports.")
         return
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="finalize",
+                                    hint="Press /finalize again.")
+        return
     today = date.today().isoformat()
     repo: ReportRepository = context.bot_data["report_repository"]
-    report = repo.get_by_date(today)
+    report = repo.get_by_date(today, site_id=site)
 
     if report is None:
         await update.message.reply_text("No report found for today. Create one first.")
@@ -1494,7 +1622,7 @@ async def finalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /lock command - lock a finalized report."""
+    """Handle /lock command - lock an approved report at the active site."""
     telegram_user = str(update.effective_user.id)
     auth = _get_auth(context)
 
@@ -1502,16 +1630,21 @@ async def lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("You don't have permission to lock reports.")
         return
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="lock",
+                                    hint="Press /lock again.")
+        return
     today = date.today().isoformat()
     repo: ReportRepository = context.bot_data["report_repository"]
-    report = repo.get_by_date(today)
+    report = repo.get_by_date(today, site_id=site)
 
     if report is None:
         await update.message.reply_text("No report found for today.")
-    elif not report.is_final:
+    elif not report.is_approved:
         await update.message.reply_text(
-            f"Report must be *final* before locking (currently: *{report.status.value}*).\n"
-            f"Finalize it first.",
+            f"Report must be *approved* before locking (currently: *{report.status.value}*).\n"
+            f"Ask a reviewer to /approve it first.",
             parse_mode="Markdown",
         )
     else:
@@ -1536,9 +1669,14 @@ async def unlock_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Unauthorized. Only admins can unlock reports.")
         return
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="unlock",
+                                    hint="Press /unlock again.")
+        return
     today = date.today().isoformat()
     repo: ReportRepository = context.bot_data["report_repository"]
-    report = repo.get_by_date(today)
+    report = repo.get_by_date(today, site_id=site)
 
     if report is None:
         await update.message.reply_text("No report found for today.")
@@ -1566,10 +1704,161 @@ async def unlock_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info("Report unlocked by admin %s", telegram_user)
 
 
+async def _review_gate(update, context) -> tuple[str, str] | None:
+    """Resolve active site + approve_daily_report gate. None = handled."""
+    chat_id = str(update.effective_user.id)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="review",
+                                    hint="Repeat the review command.")
+        return None
+    if not _get_auth(context).has_capability(chat_id, "approve_daily_report", site):
+        return None
+    return chat_id, site
+
+
+async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/approve [note] - reviewer accepts today's FINAL report."""
+    gated = await _review_gate(update, context)
+    if gated is None:
+        # Distinguish ask-site (already replied) from denial.
+        chat_id = str(update.effective_user.id)
+        site = site_session.resolve_site(update, context)
+        if site is not None:
+            await update.message.reply_text("Approval needs a reviewer grant.")
+        return
+    chat_id, site = gated
+    parts = (update.message.text or "").split(maxsplit=1)
+    note = parts[1].strip() if len(parts) > 1 else ""
+    repo: ReportRepository = context.bot_data["report_repository"]
+    report = repo.get_by_date(date.today().isoformat(), site_id=site)
+    if report is None:
+        await update.message.reply_text("No report found for today.")
+        return
+    workflow: ReportWorkflowService = context.bot_data["workflow_service"]
+    try:
+        report = workflow.approve_report(report, chat_id, note)
+    except ReportLifecycleError as e:
+        await update.message.reply_text(f"Could not approve: {e}")
+        return
+    await update.message.reply_text(
+        f"\u2705 *Report Approved*\n\nDate: {report.date}\n"
+        f"Status: *{report.status.value}*\n\nLock it with /lock.",
+        reply_markup=report_actions_keyboard(report.status.value,
+                                             role=_get_role(context, chat_id)),
+        parse_mode="Markdown",
+    )
+
+
+async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reject <note> - reviewer returns today's FINAL report for rework."""
+    gated = await _review_gate(update, context)
+    if gated is None:
+        chat_id = str(update.effective_user.id)
+        site = site_session.resolve_site(update, context)
+        if site is not None:
+            await update.message.reply_text("Rejection needs a reviewer grant.")
+        return
+    chat_id, site = gated
+    parts = (update.message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text("Usage: /reject <reason note> (note required).")
+        return
+    repo: ReportRepository = context.bot_data["report_repository"]
+    report = repo.get_by_date(date.today().isoformat(), site_id=site)
+    if report is None:
+        await update.message.reply_text("No report found for today.")
+        return
+    workflow: ReportWorkflowService = context.bot_data["workflow_service"]
+    try:
+        report = workflow.reject_report(report, chat_id, parts[1].strip())
+    except ReportLifecycleError as e:
+        await update.message.reply_text(f"Could not reject: {e}")
+        return
+    await update.message.reply_text(
+        f"\U0001f501 *Report Rejected*\n\nDate: {report.date}\n"
+        f"Reason: {report.reject_note}\n\nFix it, then /resubmit.",
+        reply_markup=report_actions_keyboard(report.status.value,
+                                             role=_get_role(context, chat_id)),
+        parse_mode="Markdown",
+    )
+
+
+async def resubmit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/resubmit - return a rejected report to draft for rework."""
+    chat_id = str(update.effective_user.id)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="resubmit",
+                                    hint="Press /resubmit again.")
+        return
+    repo: ReportRepository = context.bot_data["report_repository"]
+    report = repo.get_by_date(date.today().isoformat(), site_id=site)
+    if report is None:
+        await update.message.reply_text("No report found for today.")
+        return
+    auth = _get_auth(context)
+    if str(report.telegram_user) != chat_id and not auth.has_capability(
+            chat_id, "approve_daily_report", site):
+        await update.message.reply_text("Only the creator or a reviewer can resubmit.")
+        return
+    workflow: ReportWorkflowService = context.bot_data["workflow_service"]
+    try:
+        report = workflow.resubmit_report(report, chat_id)
+    except ReportLifecycleError as e:
+        await update.message.reply_text(f"Could not resubmit: {e}")
+        return
+    await update.message.reply_text(
+        f"\U0001f4cb *Report Resubmitted*\n\nDate: {report.date}\n"
+        f"Status: *{report.status.value}*\n\nEdit it, then /finalize again.",
+        reply_markup=report_actions_keyboard(report.status.value,
+                                             role=_get_role(context, chat_id)),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_report_reject_note(update: Update,
+                                    context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Text handler for the dashboard Reject button's required note."""
+    note = (update.message.text or "").strip()
+    if not note:
+        await update.message.reply_text("Send the rejection note as text.")
+        return
+    gated = await _review_gate(update, context)
+    if gated is None:
+        chat_id = str(update.effective_user.id)
+        site = site_session.resolve_site(update, context)
+        if site is not None:
+            await update.message.reply_text("Rejection needs a reviewer grant.")
+        return
+    chat_id, site = gated
+    saved_site = context.user_data.get("report_reject_site", site)
+    repo: ReportRepository = context.bot_data["report_repository"]
+    report = repo.get_by_id(context.user_data.get("report_reject_id"),
+                            site_id=saved_site)
+    if report is None:
+        await update.message.reply_text("Report not found.")
+        return
+    workflow: ReportWorkflowService = context.bot_data["workflow_service"]
+    try:
+        report = workflow.reject_report(report, chat_id, note)
+    except ReportLifecycleError as e:
+        await update.message.reply_text(f"Could not reject: {e}")
+        return
+    context.user_data.pop("report_reject_id", None)
+    context.user_data.pop("report_reject_site", None)
+    context.user_data.pop("state", None)
+    await update.message.reply_text(
+        f"\U0001f501 *Report Rejected*\n\nReason: {report.reject_note}",
+        reply_markup=report_actions_keyboard(report.status.value,
+                                             role=_get_role(context, chat_id)),
+        parse_mode="Markdown",
+    )
+
+
 def get_registration_handlers() -> list:
     return [
-        CommandHandler("start", start_command),
-        CommandHandler("help", help_command),
+        CommandHandler("start", start_command),        CommandHandler("help", help_command),
         CommandHandler("cancel", cancel_command),
         CommandHandler("fresh", fresh_start_command),
         CommandHandler("preview", preview_pdf_command),
@@ -1577,7 +1866,10 @@ def get_registration_handlers() -> list:
         CommandHandler("lock", lock_command),
         CommandHandler("unlock", unlock_command),
         CommandHandler("view", view_command),
-        CallbackQueryHandler(handle_main_menu_callback, pattern="^(dashboard|create_report|copy_yesterday|open_draft|preview_pdf|download_pdf|finalize|lock|unlock|view_report|search|help|admin_panel|add_contractor|contractor_reports|revert_last|revert_report)$"),
+        CommandHandler("approve", approve_command),
+        CommandHandler("reject", reject_command),
+        CommandHandler("resubmit", resubmit_command),
+        CallbackQueryHandler(handle_main_menu_callback, pattern="^(dashboard|create_report|copy_yesterday|open_draft|preview_pdf|download_pdf|finalize|lock|unlock|view_report|search|help|admin_panel|add_contractor|contractor_reports|revert_last|revert_report|approve_report|reject_report|resubmit_report)$"),
         CallbackQueryHandler(handle_confirmation_callback, pattern="^(confirm:|cancel:)"),
         CallbackQueryHandler(handle_contractor_report_period, pattern="^report_period:"),
         CallbackQueryHandler(handle_report_contractor_selection, pattern="^rc:"),

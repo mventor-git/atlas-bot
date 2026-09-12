@@ -58,6 +58,9 @@ class ReportStatus(str, Enum):
     - FINAL: Official report (read-only, PDF generated)
     - LOCKED: Permanently read-only (admin may unlock)
     - NO_REPORT: No labor occurred on this date
+    Phase 3a (027): review states -
+    - APPROVED: reviewer accepted FINAL (lockable)
+    - REJECTED: reviewer sent FINAL back (resubmittable to DRAFT)
     """
 
     DRAFT = "draft"
@@ -65,6 +68,12 @@ class ReportStatus(str, Enum):
 
     FINAL = "final"
     """Official report — read-only, PDF generated. (NEW v2.0, replaces GENERATED)"""
+
+    APPROVED = "approved"
+    """Reviewer accepted a FINAL report; lockable. (NEW 027)"""
+
+    REJECTED = "rejected"
+    """Reviewer returned a FINAL report with a note; resubmittable. (NEW 027)"""
 
     LOCKED = "locked"
     """Permanently read-only — admin may unlock. (NEW v2.0)"""
@@ -160,6 +169,18 @@ class Report:
     locked_by: Optional[str] = None
     """Telegram user who locked the report (NEW v2.0)."""
 
+    approved_by: Optional[str] = None
+    """Reviewer who approved the report (NEW 027)."""
+
+    approved_at: Optional[str] = None
+    """ISO datetime of approval (NEW 027)."""
+
+    rejected_by: Optional[str] = None
+    """Reviewer who rejected the report (NEW 027)."""
+
+    reject_note: Optional[str] = None
+    """Required reviewer note on rejection (NEW 027)."""
+
     source_date: Optional[str] = None
     """Original date if this report was copied from another (NEW v2.0)."""
 
@@ -191,6 +212,16 @@ class Report:
         return self.status == ReportStatus.FINAL
 
     @property
+    def is_approved(self) -> bool:
+        """Check if a reviewer approved the report (NEW 027)."""
+        return self.status == ReportStatus.APPROVED
+
+    @property
+    def is_rejected(self) -> bool:
+        """Check if a reviewer rejected the report (NEW 027)."""
+        return self.status == ReportStatus.REJECTED
+
+    @property
     def is_locked(self) -> bool:
         """Check if this report is locked (NEW v2.0)."""
         return self.status == ReportStatus.LOCKED
@@ -198,7 +229,8 @@ class Report:
     @property
     def is_generated(self) -> bool:
         """Check if this report was actually generated (legacy compatibility)."""
-        return self.status in (ReportStatus.FINAL, ReportStatus.LOCKED)
+        return self.status in (ReportStatus.FINAL, ReportStatus.APPROVED,
+                               ReportStatus.LOCKED)
 
     @property
     def is_no_report(self) -> bool:

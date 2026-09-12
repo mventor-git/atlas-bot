@@ -173,8 +173,20 @@ def report_actions_keyboard(report_status: str, role: str = "pending") -> Inline
                 keyboard.append([InlineKeyboardButton("Revert Last", callback_data="revert_last")])
     elif report_status == "final":
         keyboard.append([InlineKeyboardButton("Download PDF", callback_data="download_pdf")])
+        if role in ("superadmin", "project_manager", "hr"):
+            keyboard.append([
+                InlineKeyboardButton("Approve", callback_data="approve_report"),
+                InlineKeyboardButton("Reject", callback_data="reject_report"),
+            ])
         if is_admin:
             keyboard.append([InlineKeyboardButton("Lock", callback_data="lock")])
+    elif report_status == "approved":
+        keyboard.append([InlineKeyboardButton("Download PDF", callback_data="download_pdf")])
+        if is_admin:
+            keyboard.append([InlineKeyboardButton("Lock", callback_data="lock")])
+    elif report_status == "rejected":
+        if can_create:
+            keyboard.append([InlineKeyboardButton("Resubmit", callback_data="resubmit_report")])
     elif report_status == "locked":
         keyboard.append([InlineKeyboardButton("View Report", callback_data="view_report")])
         if is_admin:

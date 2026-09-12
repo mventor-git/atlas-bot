@@ -29,6 +29,9 @@ from app.repositories.event_log_repository import (
     EVENT_PDF_GENERATED,
     EVENT_REPORT_LOCKED,
     EVENT_REPORT_UNLOCKED,
+    EVENT_REPORT_APPROVED,
+    EVENT_REPORT_REJECTED,
+    EVENT_REPORT_RESUBMITTED,
     EVENT_VERSION_CREATED,
     EVENT_VERSION_RESTORED,
     EVENT_FAVORITE_ADDED,
@@ -215,6 +218,44 @@ class EventLogService:
         return self._repo.log(
             telegram_user=telegram_user,
             action=EVENT_REPORT_UNLOCKED,
+            object_type="report",
+            object_id=report.id,
+            object_date=report.date,
+        )
+
+    def log_report_approved(
+        self, telegram_user: str, report: Report, note: str = ""
+    ) -> EventLogEntry:
+        """Log that a report was approved (027)."""
+        return self._repo.log(
+            telegram_user=telegram_user,
+            action=EVENT_REPORT_APPROVED,
+            object_type="report",
+            object_id=report.id,
+            object_date=report.date,
+            new_value=note or None,
+        )
+
+    def log_report_rejected(
+        self, telegram_user: str, report: Report
+    ) -> EventLogEntry:
+        """Log that a report was rejected (027; reason on the record)."""
+        return self._repo.log(
+            telegram_user=telegram_user,
+            action=EVENT_REPORT_REJECTED,
+            object_type="report",
+            object_id=report.id,
+            object_date=report.date,
+            new_value=report.reject_note,
+        )
+
+    def log_report_resubmitted(
+        self, telegram_user: str, report: Report
+    ) -> EventLogEntry:
+        """Log that a rejected report returned to draft (027)."""
+        return self._repo.log(
+            telegram_user=telegram_user,
+            action=EVENT_REPORT_RESUBMITTED,
             object_type="report",
             object_id=report.id,
             object_date=report.date,

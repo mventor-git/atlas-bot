@@ -117,9 +117,10 @@ class ReportRepository(BaseRepository[Report]):
         cursor = self._db.execute(
             """INSERT INTO reports
                (date, day, site_id, status, pdf_path, excel_path, created_at, telegram_user,
-                updated_at, finalized_at, locked_at, locked_by, source_date, preview_pdf_path)
+                updated_at, finalized_at, locked_at, locked_by, source_date, preview_pdf_path,
+                approved_by, approved_at, rejected_by, reject_note)
                VALUES (?, ?, ?, ?, ?, ?, ?,
-                       ?, ?, ?, ?, ?, ?, ?)""",
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 report.date,
                 report.day,
@@ -135,6 +136,10 @@ class ReportRepository(BaseRepository[Report]):
                 report.locked_by,
                 report.source_date,
                 report.preview_pdf_path,
+                report.approved_by,
+                report.approved_at,
+                report.rejected_by,
+                report.reject_note,
             ),
         )
         self._db.commit()
@@ -222,7 +227,8 @@ class ReportRepository(BaseRepository[Report]):
                SET date=?, day=?, status=?, pdf_path=?, excel_path=?,
                    telegram_user=?, updated_at=?,
                    finalized_at=?, locked_at=?, locked_by=?,
-                   source_date=?, preview_pdf_path=?
+                   source_date=?, preview_pdf_path=?,
+                   approved_by=?, approved_at=?, rejected_by=?, reject_note=?
                WHERE id=? AND site_id=?""",
             (
                 report.date,
@@ -237,6 +243,10 @@ class ReportRepository(BaseRepository[Report]):
                 report.locked_by,
                 report.source_date,
                 report.preview_pdf_path,
+                report.approved_by,
+                report.approved_at,
+                report.rejected_by,
+                report.reject_note,
                 report.id,
                 site,
             ),
@@ -436,6 +446,10 @@ class ReportRepository(BaseRepository[Report]):
             finalized_at=row["finalized_at"] if "finalized_at" in row.keys() else None,
             locked_at=row["locked_at"] if "locked_at" in row.keys() else None,
             locked_by=row["locked_by"] if "locked_by" in row.keys() else None,
+            approved_by=row["approved_by"] if "approved_by" in row.keys() else None,
+            approved_at=row["approved_at"] if "approved_at" in row.keys() else None,
+            rejected_by=row["rejected_by"] if "rejected_by" in row.keys() else None,
+            reject_note=row["reject_note"] if "reject_note" in row.keys() else None,
             source_date=row["source_date"] if "source_date" in row.keys() else None,
             preview_pdf_path=row["preview_pdf_path"] if "preview_pdf_path" in row.keys() else None,
             site_id=row["site_id"] or "default" if "site_id" in row.keys() else "default",
