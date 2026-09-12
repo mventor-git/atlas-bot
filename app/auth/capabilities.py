@@ -14,6 +14,7 @@ CAPABILITIES: dict[str, tuple[str, str]] = {
     "view_own_attendance": ("SELF", "View own attendance"),
     "view_own_payroll": ("SELF", "View own payroll"),
     "view_own_requests": ("SELF", "View own HR requests"),
+    "view_site_report_summary": ("SITE", "View simple site report summaries"),
     "submit_leave": ("SELF", "File a leave request"),
     "submit_mission": ("SELF", "File a mission request"),
     "submit_advance": ("SELF", "File a salary advance"),
@@ -106,6 +107,7 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
     }),
     "viewer": frozenset({
         "view_own_attendance", "view_own_payroll", "view_own_requests",
+        "view_site_report_summary",
         "submit_hr_request", "submit_leave", "submit_mission", "request_overtime",
     }),
     "pending": frozenset(),

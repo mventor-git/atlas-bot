@@ -11,9 +11,13 @@ from pathlib import Path
 from typing import Optional
 
 from app.libre import ots
+from app.libre.columns import (
+    FIELD_ALIASES,
+    LibreFillError,
+    locate_columns,
+)
 from app.models.config import AppConfig
 from app.models.database import Report
-from app.utils.exceptions import LaborReportError
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,29 +26,6 @@ DAY_MARKERS = ("Day:", "اليوم")
 DATE_MARKERS = ("Date:", "التاريخ")
 HEADER_MARKERS = ("Contractor", "اسم المقاول")
 TOTALS_MARKERS = ("Total:", "الإجمالي")
-
-# 024: fields resolved by header text so owners may insert columns anywhere.
-# First header containing any alias wins; EN + common AR word stems.
-# ponytail: if an owner label matches nothing, they rename the header or we
-# add an alias here (upgrade: config table.header_aliases if that recurs).
-FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "contractor": ("contractor", "المقاول"),
-    "type": ("type", "البند"),
-    "zone": ("zone", "مكان"),
-    "workers": ("worker", "العمال"),
-    "craftsmen": ("craftsm", "حرفي"),  # stem: matches singular + plural
-    "helpers": ("helper", "مساعد"),
-    "details": ("detail", "التفصيلي"),
-}
-_REQUIRED = ("contractor", "workers")
-
-
-class LibreFillError(LaborReportError):
-    """Raised when template filling fails."""
-
-    @property
-    def user_message(self) -> str:
-        return "An error occurred while generating the report file. Please try again."
 
 
 def details_text(item) -> str:
@@ -149,29 +130,8 @@ class TemplateFiller:
 
     @staticmethod
     def _locate_columns(header_texts: list[str]) -> dict[str, int | None]:
-        """024: resolve fields to logical column indexes by header text.
-
-        Owners may insert Craftsmen/Helpers columns anywhere; first header
-        containing an alias wins. Missing required labels or a header that
-        matches two fields fails loudly - a wrong layout must never print.
-        Optional labels (type, zone, split columns, details) simply miss.
-        """
-        fold = [t.casefold() for t in header_texts]
-        cols: dict[str, int | None] = {}
-        for field, aliases in FIELD_ALIASES.items():
-            hits = [i for i, t in enumerate(fold)
-                    if any(a in t for a in aliases)]
-            cols[field] = hits[0] if hits else None
-        missing = [f for f in _REQUIRED if cols.get(f) is None]
-        if missing:
-            raise LibreFillError(
-                f"Template headers missing required column(s): "
-                f"{', '.join(missing)}")
-        taken = [i for i in cols.values() if i is not None]
-        if len(taken) != len(set(taken)):
-            raise LibreFillError(
-                "Template headers are ambiguous (one label matches two fields)")
-        return cols
+        """Resolve fields to logical column indexes (030: shared contract)."""
+        return locate_columns(header_texts)
 
     def _fill_items(self, table, items: list) -> tuple[dict, dict]:
         """Write item rows; returns (totals, resolved columns)."""
