@@ -41,7 +41,7 @@ class TestFlow17GetCommandAndDateParsing:
             day="Monday",
             status=ReportStatus.FINAL,
             items=[item],
-            preview_pdf_path="test.pdf",
+            preview_pdf_path="test.pdf", site_id="default",
         )
 
         repo_mock = MagicMock()
@@ -78,7 +78,7 @@ class TestFlow17GetCommandAndDateParsing:
             day="Monday",
             status=ReportStatus.FINAL,
             items=[item],
-            preview_pdf_path="test.pdf",
+            preview_pdf_path="test.pdf", site_id="default",
         )
 
         repo_mock = MagicMock()
@@ -113,7 +113,7 @@ class TestFlow17GetCommandAndDateParsing:
             day="Sunday",
             status=ReportStatus.FINAL,
             items=[item],
-            preview_pdf_path="test.pdf",
+            preview_pdf_path="test.pdf", site_id="default",
         )
 
         repo_mock = MagicMock()

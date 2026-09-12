@@ -618,6 +618,16 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                 )
                 return
 
+            from app.services import report_visibility as visibility
+
+            if visibility.resolve(auth, telegram_user, report.site_id) == visibility.OWNER:
+                await query.edit_message_text(
+                    visibility.render_simple(report)
+                    + "\n\n_PDF download needs reviewer access._",
+                    parse_mode="Markdown",
+                )
+                return
+
             preview_service = context.bot_data.get("pdf_preview_service")
             if preview_service:
                 pdf_path = preview_service.generate_preview(report)
@@ -1057,6 +1067,20 @@ async def handle_contractor_report_period(update: Update, context: ContextTypes.
 
     if not await require_view(update, context):
         return
+    from app.bot import site_session
+    from app.services import report_visibility as visibility
+
+    chat_id = str(update.effective_user.id)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="contractor",
+                                    hint="Pick a site, then start again.")
+        return
+    auth = context.bot_data.get("authorization_service")
+    if visibility.resolve(auth, chat_id, site) == visibility.OWNER:
+        await query.edit_message_text(
+            "Contractor history needs reviewer access.")
+        return
     telegram_user = str(update.effective_user.id)
     period = query.data.replace("report_period:", "")
 
@@ -1175,7 +1199,7 @@ async def handle_report_contractor_selection(update: Update, context: ContextTyp
         entries = []
         current = start_date
         while current <= end_date:
-            report = repo.get_by_date(current.isoformat())
+            report = repo.get_by_date(current.isoformat(), site_id=site)
             if report and report.items:
                 for item in report.items:
                     if item.contractor and contractor_name.lower() in item.contractor.lower():
@@ -1301,6 +1325,20 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
     if not await require_view(update, context):
         context.user_data.pop("state", None)
         return
+    from app.bot import site_session
+    from app.services import report_visibility as visibility
+
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="contractor",
+                                    hint="Type the name again.")
+        return
+    auth = context.bot_data.get("authorization_service")
+    if visibility.resolve(auth, str(update.effective_user.id), site) == visibility.OWNER:
+        await update.message.reply_text(
+            "Contractor history needs reviewer access.")
+        context.user_data.pop("state", None)
+        return
     telegram_user = str(update.effective_user.id)
     period = context.user_data.get("contractor_report_period", "")
     contractor_name = update.message.text.strip()
@@ -1340,7 +1378,7 @@ async def handle_contractor_report_name(update: Update, context: ContextTypes.DE
         entries = []
         current = start_date
         while current <= end_date:
-            report = repo.get_by_date(current.isoformat())
+            report = repo.get_by_date(current.isoformat(), site_id=site)
             if report and report.items:
                 for item in report.items:
                     if item.contractor and contractor_name.lower() in item.contractor.lower():
@@ -1485,6 +1523,24 @@ async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             return
 
+        from app.services import report_visibility as visibility
+
+        audience = visibility.resolve(auth, telegram_user, report.site_id)
+        if audience == visibility.NONE:
+            await update.message.reply_text(
+                "You don't have access to this site's reports.")
+            return
+        if audience == visibility.OWNER:
+            if not visibility.owner_may_see_status(
+                    report.status.value if report.status else None):
+                await update.message.reply_text(
+                    "This report is not yet available.")
+                return
+            await update.message.reply_text(
+                visibility.render_simple(report), parse_mode="Markdown")
+            logger.info("Simple report viewed via /view by user %s", telegram_user)
+            return
+
         items_text = ""
         total_workers = 0
         for i, item in enumerate(report.items, 1):
@@ -1547,6 +1603,17 @@ async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         if report is None or not report.items:
             await update.message.reply_text(
                 "\U0001f4c4 No report data to preview.\n\nAdd contractors first.",
+                parse_mode="Markdown",
+            )
+            return
+
+        from app.services import report_visibility as visibility
+
+        auth = _get_auth(context)
+        if visibility.resolve(auth, telegram_user, report.site_id) == visibility.OWNER:
+            await update.message.reply_text(
+                visibility.render_simple(report)
+                + "\n\n_PDF download needs reviewer access._",
                 parse_mode="Markdown",
             )
             return

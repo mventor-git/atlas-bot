@@ -26,7 +26,22 @@ async def compare_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not await require_view(update, context):
         return
+    from app.bot import site_session
+    from app.services import report_visibility as visibility
+
+    chat_id = str(update.effective_user.id)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="compare",
+                                    hint="Press /compare again.")
+        return
+    auth = context.bot_data.get("authorization_service")
+    if visibility.resolve(auth, chat_id, site) == visibility.OWNER:
+        await update.message.reply_text(
+            "Comparison needs reviewer access.")
+        return
     context.user_data["state"] = "awaiting_compare_date_a"
+    context.user_data["compare_site"] = site
     await update.message.reply_text(
         "\U0001f4ca *Daily Report Comparison*\n\n"
         "Send the *first date* (YYYY-MM-DD) to compare.\n\n"
@@ -92,6 +107,7 @@ async def _handle_date_b(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Clear session state
     context.user_data["state"] = "idle"
     context.user_data.pop("compare_date_a", None)
+    site = context.user_data.pop("compare_site", None)
 
     if date_a_iso == date_b_iso:
         await update.message.reply_text(
@@ -111,7 +127,8 @@ async def _handle_date_b(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     try:
-        result = comparison_service.compare(date_a_iso, date_b_iso)
+        result = comparison_service.compare(date_a_iso, date_b_iso,
+                                            site_id=site)
         await update.message.reply_text(
             result.format_summary(),
             parse_mode="Markdown",

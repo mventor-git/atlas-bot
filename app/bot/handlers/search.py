@@ -116,9 +116,24 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     # ── Try direct date lookup first (any format) ─────────────
     parsed_date = parse_date_string(query_text)
     if parsed_date is not None:
+        from app.bot import site_session
+
+        site = site_session.resolve_site(update, context)
+        if site is None:
+            await site_session.ask_site(update, context, resume="search",
+                                        hint="Send your search again.")
+            return
         date_iso = parsed_date.isoformat()
-        report = repo.get_by_date(date_iso)
+        report = repo.get_by_date(date_iso, site_id=site)
         if report is not None:
+            from app.services import report_visibility as visibility
+
+            chat_id = str(update.effective_user.id)
+            auth = context.bot_data.get("authorization_service")
+            if visibility.resolve(auth, chat_id, report.site_id) \
+                    == visibility.OWNER:
+                await _show_report_detail(update, context, report)
+                return
             # Send the PDF if available, otherwise show report detail
             if await _send_report_pdf(update, context, report, date_iso):
                 return
@@ -129,7 +144,11 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         if search_service is None:
             # Legacy fallback without search service
-            report = repo.get_by_date(query_text) if _looks_like_date(query_text) else None
+            from app.bot import site_session as _ss2
+
+            _site2 = _ss2.resolve_site(update, context)
+            report = repo.get_by_date(query_text, site_id=_site2) \
+                if _looks_like_date(query_text) and _site2 else None
             if report is not None:
                 await _show_report_detail(update, context, report)
                 return
@@ -139,7 +158,17 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-        result = search_service.search(SearchQuery(text=query_text, page=0, page_size=5))
+        from app.bot import site_session as _ss
+
+        _site = _ss.resolve_site(update, context)
+        if _site is None:
+            await _ss.ask_site(update, context, resume="search",
+                               hint="Send your search again.")
+            return
+        result = search_service.search(SearchQuery(text=query_text, page=0, page_size=5,
+                                                   site_id=_site))
+        if result.has_results:
+            context.user_data["search_site"] = _site
         if result.has_results:
             await _show_search_results(update, context, result.hits, query_text, result.total_count, result.total_pages)
         else:
@@ -165,7 +194,14 @@ async def handle_view_report_callback(update: Update, context: ContextTypes.DEFA
     repo: ReportRepository = context.bot_data["report_repository"]
 
     try:
-        report = repo.get_by_date(date_str)
+        from app.bot import site_session
+
+        site = site_session.resolve_site(update, context)
+        if site is None:
+            await site_session.ask_site(update, context, resume=f"view:{date_str}",
+                                        hint="Press the button again.")
+            return
+        report = repo.get_by_date(date_str, site_id=site)
         if report is None:
             await query.edit_message_text(f"No report found for {date_str}.")
             return
@@ -195,7 +231,8 @@ async def handle_search_page(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("Search session expired. Please start a new search.")
         return
 
-    result = search_service.search(SearchQuery(text=query_text, page=page, page_size=page_size))
+    result = search_service.search(SearchQuery(text=query_text, page=page, page_size=page_size,
+                                                   site_id=context.user_data.get("search_site")))
     page_results = _format_search_hits(result.hits)
     total_pages = result.total_pages
 
@@ -231,8 +268,35 @@ async def _show_report_detail(update, context, report) -> None:
 
     Works both from callback queries (edits the current message)
     and from direct text messages (sends a new reply).
+    Audience rule (029): OWNER gets the simple text and never the file.
     If the report has a PDF file, it is sent as a document.
     """
+    from app.services import report_visibility as visibility
+
+    chat_id = str(update.effective_user.id)
+    auth = context.bot_data.get("authorization_service")
+    audience = visibility.resolve(auth, chat_id, report.site_id)
+    if audience == visibility.NONE:
+        sender = update.callback_query.edit_message_text \
+            if update.callback_query else update.message.reply_text
+        await sender("You don't have access to this site's reports.")
+        return
+    if audience == visibility.OWNER:
+        if not visibility.owner_may_see_status(
+                report.status.value if report.status else None):
+            sender = update.callback_query.edit_message_text \
+                if update.callback_query else update.message.reply_text
+            await sender("This report is not yet available.")
+            return
+        text = visibility.render_simple(report) + \
+            "\n\n_PDF download needs reviewer access._"
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        return
+
     total_workers = sum((i.workers or 0) for i in (report.items or []))
     contractor_count = len(report.items) if report.items else 0
 
