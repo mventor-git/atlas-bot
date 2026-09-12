@@ -109,10 +109,12 @@ class TestDailyFill:
 
 
 class TestSplitRender:
-    """023: craftsmen+helpers print in the detailed-number column (G)."""
+    """023/024: the SHIPPED templates carry dedicated split columns;
+    unknown splits render blank; manual details stay in Details (last col).
+    """
 
     def _row_for(self, grid, contractor):
-        (row,) = [r for r in grid if len(r) > 2 and r[2] == contractor]
+        (row,) = [r for r in grid if len(r) > 8 and r[2] == contractor]
         return row
 
     def test_split_plus_derived_and_manual_wins(self, config, temp_dir: Path):
@@ -127,20 +129,39 @@ class TestSplitRender:
             ])
         out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "s.ods")))
         grid = _texts(out)
-        assert self._row_for(grid, "SplitCo")[6] == "7+3"
-        assert self._row_for(grid, "DerivedCo")[6] == "10+0"
-        assert self._row_for(grid, "ManualCo")[6] == "10 Mason, 3 Helper"
+        split = self._row_for(grid, "SplitCo")
+        assert (split[5], split[6], split[7], split[8]) == ("10", "7", "3", "")
+        derived = self._row_for(grid, "DerivedCo")
+        assert (derived[6], derived[7]) == ("10", "0")  # helpers derived
+        manual = self._row_for(grid, "ManualCo")
+        assert manual[8] == "10 Mason, 3 Helper"
 
-    def test_legacy_item_prints_empty(self, config, temp_dir: Path):
+    def test_unknown_split_prints_blank(self, config, temp_dir: Path):
         rep = Report(
             date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
             items=[ReportItem(contractor="OldCo", workers=4)])
         out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "l.ods")))
-        assert self._row_for(_texts(out), "OldCo")[6] == ""
+        row = self._row_for(_texts(out), "OldCo")
+        assert (row[6], row[7], row[8]) == ("", "", "")
+
+    def test_totals_have_three_sums(self, config, temp_dir: Path):
+        rep = Report(
+            date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
+            items=[
+                ReportItem(contractor="A1", workers=10, craftsmen=7,
+                           helpers=3),
+                ReportItem(contractor="A2", workers=8, craftsmen=4,
+                           helpers=4),
+                ReportItem(contractor="A3", workers=6),  # unknown split
+            ])
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "t.ods")))
+        grid = _texts(out)
+        (tot,) = [r for r in grid if "Total" in " ".join(r)]
+        assert (tot[5], tot[6], tot[7]) == ("24", "11", "7")
 
 
 def _relabel_header(src: str, dst: str, updates: dict):
-    """Copy a shipped template with header cell renames (024 fixture)."""
+    """Copy a shipped template with header cell renames (fixtures)."""
     from app.libre import ots as _ots
 
     doc = _ots.load_doc(src)
@@ -157,34 +178,29 @@ SMALL = "templates/contractor-daily-labor-template.ods"
 
 
 class TestDedicatedColumns:
-    """024: header-driven columns; owner-inserted Craftsmen/Helpers."""
+    """024: header-driven lookup + loud failures."""
 
-    def test_split_columns_fill_and_total(self, config, temp_dir: Path):
-        tpl = temp_dir / "split.ods"
+    def test_legacy_layout_keeps_composite(self, config, temp_dir: Path):
+        """Split headers removed -> 'C+H' composite resumes in Details."""
+        tpl = temp_dir / "legacy.ods"
         _relabel_header(SMALL, str(tpl),
-                        {7: "Craftsmen", 8: "Helpers"})
+                        {6: "", 7: ""})
         cfg = config.model_copy(update={"template": config.template.model_copy(
             update={"small_template": str(tpl)})})
         rep = Report(
             date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
-            items=[
-                ReportItem(contractor="A Co", workers=10, craftsmen=7,
-                           helpers=3),
-                ReportItem(contractor="B Co", workers=7, craftsmen=2),
-                ReportItem(contractor="C Co", workers=4),
-            ])
+            items=[ReportItem(contractor="OldCo", workers=10, craftsmen=7,
+                              helpers=3)])
         out = Path(TemplateFiller(cfg).fill(rep, str(temp_dir / "r.ods")))
-        grid = _texts(out)
-        a, b, c = (self._row_for(grid, n) for n in ("A Co", "B Co", "C Co"))
-        assert (a[5], a[7], a[8], a[6]) == ("10", "7", "3", "")
-        assert (b[5], b[7], b[8]) == ("7", "2", "5")  # helpers derived
-        assert (c[7], c[8]) == ("", "")              # unknown, never 0
-        (tot,) = [r for r in grid if r[2:6] and "Total:" in " ".join(r)]
-        assert tot[5] == "21" and tot[7] == "9" and tot[8] == "8"
-
-    def _row_for(self, grid, contractor):
-        (row,) = [r for r in grid if len(r) > 8 and r[2] == contractor]
-        return row
+        from app.libre import ots as _ots
+        doc = _ots.load_doc(str(out))
+        table = _ots.first_table(doc)
+        h = _ots.find_first(table, ("Contractor",))
+        rows = table.getElementsByType(_ots.TableRow)
+        data = [_ots.cell_text(c)
+                for c in _ots.logical_cells(rows[h + 1])]
+        assert (data[6], data[7]) == ("", "")
+        assert data[8] == "7+3"          # composite back in Details
 
     def test_missing_workers_header_fails_loudly(self, config, temp_dir: Path):
         from app.libre.filler import LibreFillError
@@ -205,6 +221,95 @@ class TestDedicatedColumns:
             update={"small_template": str(tpl)})})
         with pytest.raises(LibreFillError):
             TemplateFiller(cfg).fill(_report(1), str(temp_dir / "y.ods"))
+
+
+def _mixed_items(n):
+    """Covers: full split, workers-only (unknown), craftsmen-derivation,
+    and manual details coexisting with a split."""
+    items = []
+    for i in range(n):
+        if i % 4 == 0:
+            items.append(ReportItem(contractor=f"P{i}", workers=10 + i,
+                                    craftsmen=6 + i, helpers=4 + i,
+                                    details=f"note{i}" if i % 8 == 0 else None))
+        elif i % 4 == 1:
+            items.append(ReportItem(contractor=f"P{i}", workers=5))
+        elif i % 4 == 2:
+            items.append(ReportItem(contractor=f"P{i}", workers=9,
+                                    craftsmen=9))
+        else:
+            items.append(ReportItem(contractor=f"P{i}", workers=7,
+                                    craftsmen=7, helpers=0))
+    return items
+
+
+def _force_template(config, key, path):
+    t = config.template.model_copy(update={
+        "small_template": path, "medium_template": path,
+        "large_template": path})
+    return config.model_copy(update={"template": t})
+
+
+PRODUCTION = [
+    ("small", "templates/contractor-daily-labor-template.ods", 2),
+    ("medium", "templates/medium_template.ots", 9),
+    ("large", "templates/large_template.ots", 25),
+]
+
+
+class TestProductionTemplates:
+    """024 acceptance: shipped templates expose and fill the split."""
+
+    @pytest.mark.parametrize("name,path,n", PRODUCTION)
+    def test_headers_and_fill(self, name, path, n, config, temp_dir: Path):
+        if not Path(path).exists():
+            pytest.skip(f"{path} not present")
+        cfg = _force_template(config, name, path)
+        rep = Report(date="2026-09-11", day="Friday",
+                     status=ReportStatus.DRAFT, items=_mixed_items(n))
+        out = Path(TemplateFiller(cfg).fill(
+            rep, str(temp_dir / f"{name}.ods")))
+        grid = _texts(out)
+        flat = "|".join(r[6] + "," + r[7] if len(r) > 7 else ""
+                        for r in grid[:10])
+        assert "Craftsmen" in flat and "Helpers" in flat
+        items = _mixed_items(n)
+        tw = sum(x.workers for x in items)
+        tc = sum(x.craftsmen for x in items if x.craftsmen is not None)
+        th = sum(x.helpers if x.helpers is not None
+                 else (x.workers or 0) - (x.craftsmen or 0)
+                 for x in items if x.craftsmen is not None)
+        (tot,) = [r for r in grid if "Total" in " ".join(r)]
+        assert tot[5] == str(tw) and tot[6] == str(tc) and tot[7] == str(th)
+        first = next(r for r in grid if r[2] == "P0")
+        assert (first[5], first[6], first[7]) == ("10", "6", "4")
+        second = next(r for r in grid if r[2] == "P1")
+        assert (second[6], second[7]) == ("", "")      # unknown blank
+        last = next(r for r in grid if r[2] == f"P{n - 1}")
+        assert last[2] == f"P{n - 1}"                  # cloned rows reached
+
+    @pytest.mark.parametrize("name,path,n", PRODUCTION)
+    def test_render_pages_no_spill(self, name, path, n, config,
+                                   temp_dir: Path):
+        """soffice-gated: page counts must equal the pre-024 baseline."""
+        from app.libre.pdf import PDFGenerator, find_soffice
+
+        try:
+            find_soffice()
+        except Exception:
+            pytest.skip("soffice not available")
+        cfg = _force_template(config, name, path)
+        rep = Report(date="2026-09-11", day="Friday",
+                     status=ReportStatus.DRAFT, items=_mixed_items(n))
+        ods = Path(TemplateFiller(cfg).fill(
+            rep, str(temp_dir / f"{name}.ods")))
+        pdf_path = temp_dir / f"{name}.pdf"
+        pdf = Path(PDFGenerator(cfg).convert_to_pdf(str(ods), str(pdf_path)))
+        assert pdf.exists() and pdf.stat().st_size > 1000
+        assert pdf.stat().st_mtime >= ods.stat().st_mtime - 1
+        import re as _re
+        pages = len(_re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
+        assert pages == {"small": 1, "medium": 2, "large": 3}[name]
 
 
 class TestContractorReport:

@@ -28,7 +28,9 @@ def first_table(doc) -> Table:
 
 
 def cell_text(cell: TableCell) -> str:
-    """Concatenated text of a cell."""
+    """Concatenated text of a cell (covered slots read as empty)."""
+    if cell is None:
+        return ""
     return "/".join(
         "".join(str(n) for n in p.childNodes if n.nodeType == 3)
         for p in cell.getElementsByType(P)
@@ -37,6 +39,8 @@ def cell_text(cell: TableCell) -> str:
 
 def set_cell_text(cell: TableCell, text: str) -> None:
     """Replace a cell's content with a single paragraph of text."""
+    if cell is None:
+        raise ValueError("refusing to write into a merged (covered) slot")
     for p in list(cell.getElementsByType(P)):
         cell.removeChild(p)
     p = P()
@@ -160,9 +164,21 @@ def clone_row_after(table: Table, idx: int) -> int:
 
 
 def logical_cells(row: TableRow) -> list:
-    """Cells expanded so ``cells[i]`` is logical column ``i``."""
+    """Cells expanded so ``cells[i]`` is logical column ``i``.
+
+    A cell with ``numbercolumnsspanned=N`` occupies N logical columns:
+    positions after the first are ``None`` (covered, never written).
+    """
     expand_repeats(row)
-    return row_cells(row)
+    out: list = []
+    for cell in row_cells(row):
+        span = int(cell.getAttribute("numbercolumnsspanned") or 1)
+        if span > 1:
+            out.append(cell)
+            out.extend([None] * (span - 1))
+        else:
+            out.append(cell)
+    return out
 
 
 def save(doc, path: str | Path) -> str:
