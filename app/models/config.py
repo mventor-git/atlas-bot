@@ -232,6 +232,10 @@ class NotificationConfig(BaseModel):
     empty_template_file: str = Field("templates/empty-day.ots", description="Template for empty/no_report days")
     check_interval_seconds: int = Field(30, description="How often to check time (seconds)", ge=10, le=300)
     send_to_admin_only: bool = Field(False, description="If true, only sends notifications to admin users")
+    notify_max_attempts: int = Field(4, description="Outbox send attempts before terminal failure", ge=1, le=10)
+    notify_retry_backoff_min: list[int] = Field(default_factory=lambda: [1, 15, 60],
+                                                description="Retry delays in minutes after attempt 1, 2, 3")
+    escalation_after_min: int = Field(60, description="Minutes past deadline before escalating missing reports to reviewers", ge=0)
 
 
 class AppConfig(BaseModel):

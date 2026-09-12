@@ -58,6 +58,8 @@ from app.services.discipline_service import DisciplineService
 from app.repositories.discipline_repository import DisciplineRepository
 from app.services.payroll_service import PayrollService
 from app.repositories.payroll_repository import PayrollRepository
+from app.repositories.notification_repository import NotificationRepository
+from app.services.notification_outbox import NotificationOutbox
 from app.services.attendance_service import AttendanceService
 from app.repositories.attendance_repository import AttendanceRepository
 from app.services.attendance_day_service import AttendanceDayService
@@ -318,6 +320,10 @@ def main() -> None:
         if migrated:
             logger.info("Migrated %d legacy site memberships.", migrated)
         payroll_service = PayrollService(PayrollRepository(db_manager), user_repo)
+        notification_outbox = NotificationOutbox(
+            NotificationRepository(db_manager),
+            max_attempts=config.notification.notify_max_attempts,
+            backoff_min=tuple(config.notification.notify_retry_backoff_min))
 
         app = create_bot_app(
             report_repository=report_repo_with_events,
@@ -344,6 +350,7 @@ def main() -> None:
             case_service=case_service,
             discipline_service=discipline_service,
             payroll_service=payroll_service,
+            notification_outbox=notification_outbox,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop
@@ -352,8 +359,10 @@ def main() -> None:
 
         async def _on_start(app_instance):
             nonlocal _nm, _wd
-            # Start notification manager
-            _nm = NotificationManager(app_instance, db_manager, config)
+            # Start notification manager (shares the durable outbox)
+            app_instance.bot_data["notification_outbox"] = notification_outbox
+            _nm = NotificationManager(app_instance, db_manager, config,
+                                      outbox=notification_outbox)
             _nm.start()
             app_instance.bot_data["notification_manager"] = _nm
             logger.info("Notification manager stored in bot_data")

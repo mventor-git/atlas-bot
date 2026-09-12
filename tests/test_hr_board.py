@@ -144,6 +144,10 @@ class TestSiteBoard:
         assert "Queued for print" in text
 
     async def test_notify_targets_memberships_only(self, env):
+        from app.repositories.notification_repository import (
+            NotificationRepository)
+        from app.services.notification_outbox import NotificationOutbox
+
         _role(env["ctx"], "hr")
         users = env["users"]
         users.upsert(_user("111", "normal_user", "main"))
@@ -153,6 +157,8 @@ class TestSiteBoard:
         env["members"].grant("111", "main", [])
         env["members"].grant("112", "main", [])
         env["members"].grant("114", "hq", [])
+        env["ctx"].bot_data["notification_outbox"] = NotificationOutbox(
+            NotificationRepository(env["manager"]))
         upd = make_update(999, callback_data="hr_notify:main")
         await hr_handlers.handle_hr_callback(upd, env["ctx"])
         sent_to = sorted(
@@ -161,7 +167,18 @@ class TestSiteBoard:
         )
         assert sent_to == [111, 112]          # 115 legacy-tagged excluded
         text = upd.callback_query.edit_message_text.call_args[0][0]
-        assert "2/2" in text
+        assert "Queued 2 reminder" in text
+        # durable: one row per recipient, deduped on repeat
+        outbox = env["ctx"].bot_data["notification_outbox"]
+        assert outbox.pending_count("main") == 0  # inline dispatch sent them
+        sent_rows = [outbox._repo.get_by_dedup(
+            f"main|{date.today().isoformat()}|{c}|report_missing|"
+            f"missing:{date.today().isoformat()}|0")
+            for c in ("111", "112")]
+        assert all(r is not None and r.status == "sent" for r in sent_rows)
+        await hr_handlers.handle_hr_callback(
+            make_update(999, callback_data="hr_notify:main"), env["ctx"])
+        assert outbox.pending_count("main") == 0  # repeat sends nothing new
 
     async def test_print_all(self, env):
         _role(env["ctx"], "hr")

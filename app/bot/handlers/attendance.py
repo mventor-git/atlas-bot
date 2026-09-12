@@ -84,8 +84,13 @@ async def _day_hook(context: ContextTypes.DEFAULT_TYPE, event) -> None:
                        getattr(event, "id", "?"), e)
 
 
-async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str,
-                  reply_markup=None) -> None:
+async def _notify_confirmer(context: ContextTypes.DEFAULT_TYPE, chat_id: str,
+                          text: str, reply_markup=None) -> None:
+    """Direct send for interactive (button-carrying) confirmer prompts.
+
+    Buttons cannot travel through the text-only outbox; the prompt is part
+    of the live check-in flow, so it stays a synchronous direct send.
+    """
     try:
         await context.bot.send_message(chat_id=int(chat_id), text=text,
                                        reply_markup=reply_markup,
@@ -237,7 +242,7 @@ async def _route_to_confirmer(update, context, event) -> None:
         InlineKeyboardButton("Confirm", callback_data=f"att_confirm:{event.id}"),
         InlineKeyboardButton("Dispute", callback_data=f"att_dispute:{event.id}"),
     ]])
-    await _notify(
+    await _notify_confirmer(
         context, str(target),
         f"Attendance to review: `{event.chat_id}` "
         f"({event.check_type}, {event.location_verdict or 'unchecked'}).",
@@ -281,8 +286,12 @@ async def handle_attendance_callback(update: Update, context: ContextTypes.DEFAU
             await query.edit_message_text(f"Could not confirm: {e}")
             return
         await query.edit_message_text(f"Confirmed attendance #{event.id}.")
-        await _notify(context, event.chat_id,
-                      f"Your check-{event.check_type} was confirmed.")
+        from app.bot.notify import notify
+
+        await notify(context, "attendance_update", event.chat_id,
+                     event.site_id, reference=f"att:{event.id}",
+                     date=event.event_date, kind=event.check_type,
+                     verdict="confirmed")
     elif action == "att_dispute":
         context.user_data["att_dispute_id"] = event_id
         context.user_data["att_dispute_event_site"] = site
@@ -308,8 +317,12 @@ async def handle_att_note(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.pop("att_dispute_event_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Disputed attendance #{event.id}.")
-    await _notify(context, event.chat_id,
-                  f"Your check-{event.check_type} was disputed: {note}")
+    from app.bot.notify import notify
+
+    await notify(context, "attendance_update", event.chat_id,
+                 event.site_id, reference=f"att:{event.id}",
+                 date=event.event_date, kind=event.check_type,
+                 verdict=f"disputed: {note}")
 
 
 # --- day aggregate (026) ---
@@ -564,8 +577,11 @@ async def handle_day_resolve(update: Update,
     context.user_data.pop("day_resolve_id", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Day `#{day.id}` resolved: `{day.verdict}`.")
-    await _notify(context, day.chat_id,
-                  f"Your attendance for `{day.day_date}` was resolved: {day.verdict}.")
+    from app.bot.notify import notify
+
+    await notify(context, "attendance_update", day.chat_id, day.site_id,
+                 reference=f"day:{day.id}", date=day.day_date, kind="day",
+                 verdict=day.verdict or "resolved")
 
 
 async def handle_claim_note(update: Update,
@@ -587,6 +603,11 @@ async def handle_claim_note(update: Update,
     context.user_data.pop("day_claim_approve", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Claim `#{claim.id}` {claim.status}.")
+    from app.bot.notify import notify
+
+    await notify(context, "claim_decision", claim.chat_id, claim.site_id,
+                 reference=f"claim:{claim.id}", date=claim.day_date,
+                 verdict=claim.status, note=note)
 
 
 def get_registration_handlers() -> list:

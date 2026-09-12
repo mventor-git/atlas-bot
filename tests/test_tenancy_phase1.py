@@ -300,7 +300,7 @@ class TestHandlerIsolation:
         sent = {c.kwargs["chat_id"] for c in ctx.bot.send_message.call_args_list}
         assert 23 in sent and 1 in sent      # memberships only
         assert 22 not in sent                # legacy users.site_id NOT authority
-        assert "2/2" in q.edit_message_text.call_args[0][0]
+        assert "Queued 2 reminder" in q.edit_message_text.call_args[0][0]
 
     async def test_board_rejects_unknown_site_callback(self, stack: Stack, monkeypatch):
         from app.database import driver

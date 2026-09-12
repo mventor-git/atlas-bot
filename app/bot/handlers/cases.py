@@ -49,14 +49,6 @@ def _can_resolve(chat_id: str, context, case_type: str, site: str) -> bool:
     return _auth(context).has_capability(chat_id, REVIEW_CAPS[case_type][1], site)
 
 
-async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str) -> None:
-    try:
-        await context.bot.send_message(chat_id=int(chat_id), text=text,
-                                       parse_mode="Markdown")
-    except Exception as e:
-        logger.warning("Could not notify %s: %s", chat_id, e)
-
-
 def _render(case: Case) -> str:
     lines = [
         f"*{case.case_type.title()} #{case.id}* - `{case.status}`",
@@ -137,6 +129,16 @@ async def handle_case_summary(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(
         f"Filed {kind} `#{case.id}` at `{site}` - a reviewer will triage it.",
         parse_mode="Markdown")
+    from app.bot.notify import notify
+
+    for reviewer in _auth(context).chat_ids_for_site(
+            site, REVIEW_CAPS[kind][0]):
+        if str(reviewer) != str(chat_id):
+            await notify(context, "case_update", reviewer, site,
+                         reference=f"{kind}:{case.id}",
+                         date=(case.created_at or "")[:10], kind=kind,
+                         ref=case.id, verdict="filed - needs triage",
+                         note=text[:120])
 
 
 # --- queues ---
@@ -218,8 +220,12 @@ async def handle_case_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         await query.edit_message_text(
             f"Case `#{case.id}` is now under review.", parse_mode="Markdown")
-        await _notify(context, case.reporter_chat_id,
-                      f"Your {case.case_type} `#{case.id}` is under review.")
+        from app.bot.notify import notify
+
+        await notify(context, "case_update", case.reporter_chat_id, site,
+                     reference=f"{case.case_type}:{case.id}",
+                     date=(case.created_at or "")[:10], kind=case.case_type,
+                     ref=case.id, verdict="under review", note="")
     elif action == "case_resolve":
         case = service.get(case_id, site_id=site)
         if case is None or not _can_resolve(chat_id, context, case.case_type, site):
@@ -258,8 +264,12 @@ async def handle_case_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Resolved case `#{case.id}`.",
                                     parse_mode="Markdown")
-    await _notify(context, case.reporter_chat_id,
-                  f"Your {case.case_type} `#{case.id}` was resolved: {note}")
+    from app.bot.notify import notify
+
+    await notify(context, "case_update", case.reporter_chat_id,
+                 case.site_id, reference=f"{case.case_type}:{case.id}",
+                 date=(case.created_at or "")[:10], kind=case.case_type,
+                 ref=case.id, verdict="resolved", note=note)
 
 
 async def handle_case_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -280,6 +290,17 @@ async def handle_case_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Appealed case `#{case.id}` - back to review.",
                                     parse_mode="Markdown")
+    from app.bot.notify import notify
+
+    reviewers = [c for c in _auth(context).chat_ids_for_site(
+        case.site_id, REVIEW_CAPS[case.case_type][1])]
+    for reviewer in reviewers:
+        if str(reviewer) != str(chat_id):
+            await notify(context, "case_update", reviewer, case.site_id,
+                         reference=f"{case.case_type}:{case.id}",
+                         date=(case.created_at or "")[:10],
+                         kind=case.case_type, ref=case.id,
+                         verdict="appealed - back to review", note=note)
 
 
 def get_registration_handlers() -> list:

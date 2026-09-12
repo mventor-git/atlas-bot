@@ -246,10 +246,56 @@ async def add_contractor_command(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 
+async def notify_pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show pending outbox rows (superadmin trial utility, 031).
+
+    Usage: /notify_pending [site] - totals, or the first 15 rows of a site.
+    """
+    telegram_user = str(update.effective_user.id)
+    auth = _get_auth(context)
+    if auth is None or not auth.is_super_admin(telegram_user):
+        await update.message.reply_text("Unauthorized. Superadmin only.")
+        return
+    outbox = (context.bot_data or {}).get("notification_outbox")
+    if outbox is None:
+        await update.message.reply_text("Outbox not wired.")
+        return
+    args = context.args or []
+    if not args:
+        total = outbox.pending_count()
+        await update.message.reply_text(f"Pending notifications: {total}.")
+        return
+    rows = outbox.pending_for_site(args[0])
+    lines = [f"Pending in `{args[0]}`: {len(rows)}"]
+    for row in rows[:15]:
+        lines.append(f"#{row.id} {row.ntype} -> `{row.recipient}` "
+                     f"try {row.attempts}/{row.max_attempts}")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def notify_cycle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run one outbox dispatch cycle now (superadmin trial utility, 031)."""
+    telegram_user = str(update.effective_user.id)
+    auth = _get_auth(context)
+    if auth is None or not auth.is_super_admin(telegram_user):
+        await update.message.reply_text("Unauthorized. Superadmin only.")
+        return
+    manager = (context.bot_data or {}).get("notification_manager")
+    if manager is None:
+        await update.message.reply_text("Notification manager not running.")
+        return
+    report = await manager.run_cycle()
+    flat = "; ".join(f"{site}={list(v) if isinstance(v, dict) else v}"
+                     for site, v in (report or {}).items())
+    await update.message.reply_text(f"Cycle done: {flat or 'no sites'}.")
+
+
 def get_registration_handlers() -> list:
     return [
         CommandHandler("admin", admin_command),
         CommandHandler("add_contractor", add_contractor_command),
+        CommandHandler("notify_pending", notify_pending_command),
+        CommandHandler("notify_cycle", notify_cycle_command),
         CallbackQueryHandler(
             handle_admin_callback,
             pattern="^(admin_events|admin_health|admin_autolock|admin_users|admin_role_gui)$",

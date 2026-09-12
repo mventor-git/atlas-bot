@@ -61,6 +61,7 @@ def create_bot_app(
     case_service=None,
     discipline_service=None,
     payroll_service=None,
+    notification_outbox=None,
 ) -> Application:
     """Create and configure the Telegram bot application.
 
@@ -103,6 +104,7 @@ def create_bot_app(
     app.bot_data["case_service"] = case_service
     app.bot_data["discipline_service"] = discipline_service
     app.bot_data["payroll_service"] = payroll_service
+    app.bot_data["notification_outbox"] = notification_outbox
     app.bot_data["app_config"] = app_config
 
     logger.info(

@@ -372,6 +372,12 @@ class HRService:
         """Public site queue of pending confirmations/decisions."""
         return self._repo.list_pending(site_id=site_id)
 
+    def pending_overtime(self, site_id: str | None = None) -> list[HRRequest]:
+        """Overtime requests still awaiting PM confirmation (031 sweep)."""
+        return [r for r in self.pending(site_id=site_id)
+                if getattr(r, "request_type", "") == "overtime"
+                and getattr(r, "status", "") == "pending"]
+
     def history_for_user(
         self, chat_id: str, window: str = "month",
         site_id: str | None = None, today: str = "",
