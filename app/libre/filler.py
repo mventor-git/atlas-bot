@@ -121,14 +121,16 @@ class TemplateFiller:
     # --- internals ---
 
     def _value_cell(self, table, row_idx: int):
-        """Cell holding the value next to a label (first spanned/non-empty after col 0)."""
+        """Cell holding the value next to a label (merged or text cell)."""
         row = table.getElementsByType(ots.TableRow)[row_idx]
         cells = ots.logical_cells(row)
         for cell in cells[1:]:
+            if cell is None:
+                continue
             span = int(cell.getAttribute("numbercolumnsspanned") or 1)
             if span > 1 or ots.cell_text(cell):
                 return cell
-        return cells[1]
+        return next(c for c in cells[1:] if c is not None)
 
     def _fill_day_date(self, table, report: Report) -> None:
         # Templates without day/date markers (e.g. empty-day) keep content as-is.
@@ -202,10 +204,19 @@ class TemplateFiller:
 
             def write(field: str, text: str) -> None:
                 idx = cols.get(field)
-                if idx is not None:
-                    ots.set_cell_text(cells[idx], text)
+                if idx is None:
+                    return
+                slot = cells[idx]
+                if slot is None:
+                    raise LibreFillError(
+                        f"Template column for '{field}' is inside a merged "
+                        "region")
+                ots.set_cell_text(slot, text)
 
             if serial_idx is not None:
+                if cells[serial_idx] is None:
+                    raise LibreFillError(
+                        "Serial column is inside a merged region")
                 ots.set_cell_text(cells[serial_idx], str(n + 1))
             write("contractor", item.contractor or "")
             write("type", item.type or "")
@@ -228,7 +239,12 @@ class TemplateFiller:
         )
         for field in ("workers", "craftsmen", "helpers"):
             idx = cols.get(field)
-            if idx is not None:
-                value = totals[field]
-                # Unknown splits stay blank; totals never fabricate zeros.
-                ots.set_cell_text(cells[idx], "" if value is None else str(value))
+            if idx is None:
+                continue
+            slot = cells[idx]
+            if slot is None:
+                raise LibreFillError(
+                    f"Total column '{field}' is inside a merged region")
+            value = totals[field]
+            # Unknown splits stay blank; totals never fabricate zeros.
+            ots.set_cell_text(slot, "" if value is None else str(value))
