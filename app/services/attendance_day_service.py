@@ -50,11 +50,14 @@ class AttendanceDayService:
     def __init__(self, day_repo: AttendanceDayRepository,
                  event_repo: AttendanceRepository,
                  expected_start: time = time(8, 0),
-                 cutoff: time = time(17, 0)) -> None:
+                 cutoff: time = time(17, 0),
+                 calendar_for=None) -> None:
         self._days = day_repo
         self._events = event_repo
         self._expected_start = expected_start
         self._cutoff = cutoff
+        # Optional site->calendar factory (028); None keeps keys null.
+        self._calendar_for = calendar_for
 
     # --- ensures ---
 
@@ -195,11 +198,20 @@ class AttendanceDayService:
                                            site_id=day.site_id)
         claims = self._days.claims_for_day(chat_id, day_date,
                                            site_id=day.site_id)
+        required, note = None, None
+        if self._calendar_for is not None:
+            try:
+                required, note = self._calendar_for(
+                    day.site_id).describe(day_date)
+            except Exception:
+                logger.warning("Calendar describe failed for %s", day_date)
         return {
             "day": day,
             "events": events,
             "anomalies": self._anomalies(day, events),
             "claims": claims,
+            "required": required,
+            "calendar_note": note,
         }
 
     def queue(self, day_date: str,

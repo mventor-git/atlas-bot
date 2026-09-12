@@ -62,6 +62,7 @@ from app.services.attendance_service import AttendanceService
 from app.repositories.attendance_repository import AttendanceRepository
 from app.services.attendance_day_service import AttendanceDayService
 from app.repositories.attendance_day_repository import AttendanceDayRepository
+from app.services.working_calendar import WorkingCalendar
 from app.services.audit_service import AuditService
 from app.libre.filler import TemplateFiller
 from app.libre.pdf import PDFGenerator
@@ -271,7 +272,8 @@ def main() -> None:
         attendance_service = AttendanceService(AttendanceRepository(db_manager))
         day_repo = AttendanceDayRepository(db_manager)
         attendance_day_service = AttendanceDayService(
-            day_repo, AttendanceRepository(db_manager))
+            day_repo, AttendanceRepository(db_manager),
+            calendar_for=lambda site: WorkingCalendar(config, site))
         case_service = CaseService(CaseRepository(db_manager))
         discipline_service = DisciplineService(DisciplineRepository(db_manager))
 

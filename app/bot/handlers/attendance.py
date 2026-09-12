@@ -333,6 +333,8 @@ def _render_day(view: dict) -> str:
     anomalies = view["anomalies"]
     if anomalies:
         lines.append("Anomalies: " + ", ".join(anomalies))
+    if view.get("required") is False:
+        lines.append(f"Non-working day ({view.get('calendar_note') or 'calendar'})")
     claims = [c for c in view["claims"] if c.status == "open"]
     if claims:
         lines.append(f"Open claims: {len(claims)}")
