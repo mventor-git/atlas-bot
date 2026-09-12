@@ -57,6 +57,10 @@ logs/*.log
 # LibreOffice lock files
 .~lock.*#
 
+# Test-output dirs used by suite configs (relative x/y folders)
+x/
+y/
+
 # Private - never commit (local AI/working data)
 .env
 tickets/
