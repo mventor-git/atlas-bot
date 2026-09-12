@@ -42,7 +42,8 @@ class DailyComparisonService:
         """
         self._repo = report_repository
 
-    def compare(self, date_a: str, date_b: str) -> ComparisonResult:
+    def compare(self, date_a: str, date_b: str,
+                site_id: str | None = None) -> ComparisonResult:
         """Compare two reports and return their differences.
 
         Both reports must exist in the database. If either is missing,
@@ -51,6 +52,7 @@ class DailyComparisonService:
         Args:
             date_a: First report date (YYYY-MM-DD).
             date_b: Second report date (YYYY-MM-DD).
+            site_id: Tenant site (029; defaults to deployment origin).
 
         Returns:
             ComparisonResult with summary and detailed diffs.
@@ -58,8 +60,8 @@ class DailyComparisonService:
         Raises:
             DailyComparisonError: If either report does not exist.
         """
-        report_a = self._repo.get_by_date(date_a)
-        report_b = self._repo.get_by_date(date_b)
+        report_a = self._repo.get_by_date(date_a, site_id=site_id)
+        report_b = self._repo.get_by_date(date_b, site_id=site_id)
 
         if report_a is None:
             raise DailyComparisonError(

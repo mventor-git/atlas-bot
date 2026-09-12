@@ -169,14 +169,43 @@ async def _handle_date_request(
         context: The handler context.
         parsed_date: The parsed date.
     """
+    from app.bot import site_session
+    from app.services import report_visibility as visibility
+
     date_str = parsed_date.isoformat()
     display_date = parsed_date.strftime("%Y-%m-%d")
 
-    report = _get_report(context, date_str)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=f"get:{date_str}",
+                                    hint="Send the date again.")
+        return
+    repo = context.bot_data.get("report_repository")
+    report = repo.get_by_date(date_str, site_id=site) if repo else None
 
     if report is None:
         await update.message.reply_text(
             NO_REPORT_FOUND.format(date=display_date),
+            parse_mode="Markdown",
+        )
+        return
+
+    chat_id = str(update.effective_user.id)
+    auth = context.bot_data.get("authorization_service")
+    audience = visibility.resolve(auth, chat_id, report.site_id)
+    if audience == visibility.NONE:
+        await update.message.reply_text(
+            "You don't have access to this site's reports.")
+        return
+    if audience == visibility.OWNER:
+        if not visibility.owner_may_see_status(
+                report.status.value if report.status else None):
+            await update.message.reply_text(
+                "This report is not yet available.")
+            return
+        await update.message.reply_text(
+            visibility.render_simple(report)
+            + "\n\n_PDF download needs reviewer access._",
             parse_mode="Markdown",
         )
         return

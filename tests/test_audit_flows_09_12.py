@@ -420,13 +420,13 @@ class TestFlow12_Search:
 
     @pytest.mark.asyncio
     async def test_12d_view_report_from_search_results(self):
-        """User clicks result (view_report:2026-01-15) → report detail shown."""
+        """Viewer clicks result on a DRAFT (view_report:date) -> hidden (029)."""
         from app.bot.handlers.search import handle_view_report_callback
 
         update = MockHelpers.mock_update(callback_data="view_report:2026-01-15")
 
         item = ReportItem(contractor="Test Co", workers=10)
-        report = Report(date="2026-01-15", day="Monday", status=ReportStatus.DRAFT, items=[item])
+        report = Report(date="2026-01-15", day="Monday", status=ReportStatus.DRAFT, items=[item], site_id="default")
 
         repo_mock = MagicMock()
         repo_mock.get_by_date.return_value = report
@@ -438,11 +438,35 @@ class TestFlow12_Search:
 
         await handle_view_report_callback(update, context)
 
-        repo_mock.get_by_date.assert_called_once_with("2026-01-15")
+        repo_mock.get_by_date.assert_called_once_with("2026-01-15", site_id="default")
         update.callback_query.edit_message_text.assert_called_once()
         call_text = update.callback_query.edit_message_text.call_args[0][0]
-        assert "Test Co" in call_text
+        assert "not yet available" in call_text
+        assert "Test Co" not in call_text
+
+    @pytest.mark.asyncio
+    async def test_12d2_viewer_sees_simple_on_final(self):
+        """Viewer clicks result on FINAL -> simple summary, no names/files."""
+        from app.bot.handlers.search import handle_view_report_callback
+
+        update = MockHelpers.mock_update(callback_data="view_report:2026-01-15")
+
+        item = ReportItem(contractor="Test Co", workers=10)
+        report = Report(date="2026-01-15", day="Monday", status=ReportStatus.FINAL, items=[item], site_id="default")
+
+        repo_mock = MagicMock()
+        repo_mock.get_by_date.return_value = report
+
+        context = MockHelpers.mock_context(
+            user_role="viewer",
+            bot_data={"report_repository": repo_mock},
+        )
+
+        await handle_view_report_callback(update, context)
+
+        call_text = update.callback_query.edit_message_text.call_args[0][0]
         assert "2026-01-15" in call_text
+        assert "Test Co" not in call_text
 
     @pytest.mark.asyncio
     async def test_12e_search_page_pagination(self):

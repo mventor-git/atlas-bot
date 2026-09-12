@@ -687,6 +687,7 @@ class MockHelpers:
     @staticmethod
     def mock_authorization_service(role: str = "normal_user") -> MagicMock:
         """Create a mock AuthorizationService with specified role."""
+        from app.auth import capabilities as caps
         from app.services.authorization_service import AuthorizationService
         mock = MagicMock(spec=AuthorizationService)
         mock.get_role.return_value = role
@@ -701,6 +702,11 @@ class MockHelpers:
         mock.get_super_admin_chat_id.return_value = "999999999"
         mock.get_all_admin_chat_ids.return_value = {"999999999", "888888888"}
         mock.register_or_get.return_value = MagicMock()
+        mock.has_capability.side_effect = (
+            lambda chat_id, cap, site_id=None: cap in caps.for_role(role))
+        mock.resolve_active_site.side_effect = (
+            lambda chat_id, session=None: session or "default")
+        mock.sites_for_user.return_value = ["default"]
         return mock
 
     @staticmethod
@@ -881,7 +887,7 @@ class TestAsyncHandlers:
         item = ReportItem(contractor="Test Co", workers=10, zone="Zone1")
         report = Report(
             date="2026-07-12", day="Monday", status=ReportStatus.DRAFT,
-            items=[item],
+            items=[item], site_id="default",
         )
         repo_mock = MagicMock()
         repo_mock.get_by_date.return_value = report

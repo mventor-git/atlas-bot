@@ -26,6 +26,7 @@ class UniversalSearchService:
             min_workers=query.min_workers,
             max_workers=query.max_workers,
             status=self._normalize_status(query.status),
+            site_id=query.site_id,
             page=max(0, query.page),
             page_size=max(1, query.page_size),
         )
