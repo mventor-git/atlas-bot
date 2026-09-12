@@ -144,6 +144,26 @@ def run_health_check(config) -> bool:
         except OSError as e:
             checks.append((name, False, f"Cannot create directory: {dir_path} - {e}"))
 
+    # Production template contract (030): fail fast with actionable lines.
+    try:
+        from app.libre.validate import TemplateValidator
+
+        templates = (
+            ("small", config.template.small_template),
+            ("medium", config.template.medium_template),
+            ("large", config.template.large_template),
+        )
+        validator = TemplateValidator(config)
+        for tname, tpath in templates:
+            report = validator.check_template(tpath)
+            if report.passed:
+                checks.append((f"Template {tname}", True, f"valid: {tpath}"))
+            else:
+                checks.append((f"Template {tname}", False,
+                               "; ".join(str(f) for f in report.failures)))
+    except Exception as e:
+        checks.append(("Templates", False, f"validator error: {e}"))
+
     # Run checks
     for name, ok, detail in checks:
         status = "[OK]" if ok else "[FAIL]"

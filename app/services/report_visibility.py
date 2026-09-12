@@ -5,7 +5,9 @@ Audiences:
 - HQ    : view_hq_reports at ANY own site -> detailed, any authorized site.
 - SITE  : member of the report's site + create/approve_daily_report there ->
           detailed, own site (creators and reviewers must see content).
-- OWNER : member of the report's site without report caps -> SIMPLE text
+- OWNER : member of the report's site holding the EXPLICIT
+          view_site_report_summary capability (030; no access granted
+          through the mere absence of another capability) -> SIMPLE text
           of FINAL+ records only; drafts hidden; no files.
 - NONE  : deny.
 
@@ -53,9 +55,12 @@ def resolve(auth, chat_id: str, report_site: str | None) -> str:
                 or auth.has_capability(str(chat_id), "approve_daily_report",
                                        report_site):
             return SITE
+        if auth.has_capability(str(chat_id), "view_site_report_summary",
+                               report_site):
+            return OWNER
     except Exception:
         return NONE
-    return OWNER
+    return NONE
 
 
 def can_see_detail(audience: str) -> bool:
