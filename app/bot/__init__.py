@@ -142,6 +142,10 @@ def _register_handlers(app: Application) -> None:
     handlers.extend(get_admin_users_handlers())
     handlers.extend(get_retrieval_handlers())
 
+    from app.bot import site_session
+
+    handlers.extend(site_session.get_handlers())
+
     for handler in handlers:
         app.add_handler(handler)
 

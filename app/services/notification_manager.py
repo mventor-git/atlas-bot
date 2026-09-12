@@ -286,10 +286,12 @@ class NotificationManager:
             return False
 
     def _get_user_ids(self) -> set[str]:
-        """Get all known user IDs from the database or admin list.
+        """Reminder recipients for THIS deployment's origin site (Phase 1).
 
-        Queries the AuthorizationService for approved users.
-        If ``send_to_admin_only`` is set, returns only admin users.
+        Membership + capability are the authority: only active members of
+        the origin site who can create daily reports (or hold
+        view_site_reports in admin-only mode) get the reminder. The old
+        all-approved broadcast leaked site B staff into site A's pings.
         """
         user_ids: set[str] = set()
 
@@ -298,6 +300,7 @@ class NotificationManager:
 
             if auth_service is None:
                 # Fallback: query distinct telegram_user values
+                # (no tenancy authority available here; single-site only).
                 query_tables = [
                     "SELECT DISTINCT telegram_user FROM reports WHERE telegram_user IS NOT NULL",
                     "SELECT DISTINCT telegram_user FROM event_log WHERE telegram_user IS NOT NULL",
@@ -311,10 +314,15 @@ class NotificationManager:
                             user_ids.add(uid)
                 return user_ids
 
-            if self._config.notification.send_to_admin_only:
-                return auth_service.get_all_admin_chat_ids()
+            from app.database import driver
 
-            return auth_service.get_all_approved_chat_ids()
+            origin = driver.site_id()
+            if self._config.notification.send_to_admin_only:
+                return set(auth_service.chat_ids_for_site(
+                    origin, "view_site_reports"))
+
+            return set(auth_service.chat_ids_for_site(
+                origin, "create_daily_report"))
 
         except Exception as e:
             logger.error("Failed to get user IDs: %s", e)

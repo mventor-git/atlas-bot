@@ -140,6 +140,8 @@ def _ctx(auth_role_caps, service):
     auth.get_role.return_value = "hr"
     auth.has_capability.side_effect = (
         lambda chat_id, cap, site_id=None: cap in auth_role_caps)
+    auth.resolve_active_site.side_effect = (lambda chat_id, session_site=None: session_site or 'site-a')
+    auth.sites_for_user.return_value = ['site-a']
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     context.bot_data = {"authorization_service": auth, "hr_service": service}
     context.user_data = {}

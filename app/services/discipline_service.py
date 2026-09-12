@@ -92,6 +92,18 @@ class DisciplineService:
         case.appeal_note = note.strip()
         return self._repo.update(case)
 
+    # --- Queries (public for handlers; Phase 1 decoupling) ---
+
+    def get(self, case_id: int, site_id: str | None = None):
+        return self._repo.get_by_id(case_id, site_id=site_id)
+
+    def open_cases(self, site_id: str | None = None) -> list:
+        return self._repo.open_cases(site_id=site_id)
+
+    def list_against(self, chat_id: str,
+                     site_id: str | None = None) -> list:
+        return self._repo.for_subject(chat_id, site_id=site_id)
+
     # --- Internals ---
 
     def _get(self, case_id: int, site_id: str | None) -> DisciplineCase:

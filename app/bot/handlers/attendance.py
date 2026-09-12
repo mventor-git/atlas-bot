@@ -20,6 +20,7 @@ from telegram.ext import (
     filters,
 )
 
+from app.bot import site_session
 from app.models.attendance import AttendanceStatus
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -66,18 +67,6 @@ def _fence(context: ContextTypes.DEFAULT_TYPE, site_id: str | None = None):
     return fence if isinstance(fence, dict) else None
 
 
-def _resolve_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Active site for this user (None -> must pick)."""
-    chat_id, _ = _me(update)
-    auth = _auth(context)
-    resolve = getattr(auth, "resolve_active_site", None)
-    if resolve is None:
-        from app.database import driver
-
-        return driver.site_id()
-    return resolve(chat_id, context.user_data.get("active_site"))
-
-
 async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str,
                   reply_markup=None) -> None:
     try:
@@ -100,33 +89,46 @@ def _location_keyboard() -> ReplyKeyboardMarkup:
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start check-in: ask for a live location share."""
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "check_in"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="checkin",
+                                    hint="Press /checkin again.")
+        return
+    if not _auth(context).has_capability(chat_id, "check_in", site):
         await update.message.reply_text("Check-in needs an approved account.")
         return
     context.user_data["state"] = "awaiting_location_in"
     await update.message.reply_text(
-        "Share your live location to check in (or /cancel).",
-        reply_markup=_location_keyboard(),
-    )
+        f"Share your live location to check in at `{site}` (or /cancel).",
+        reply_markup=_location_keyboard(), parse_mode="Markdown")
 
 
 async def checkout_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start check-out: ask for a live location share."""
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "check_out"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="checkout",
+                                    hint="Press /checkout again.")
+        return
+    if not _auth(context).has_capability(chat_id, "check_out", site):
         await update.message.reply_text("Check-out needs an approved account.")
         return
     context.user_data["state"] = "awaiting_location_out"
     await update.message.reply_text(
-        "Share your live location to check out (or /cancel).",
-        reply_markup=_location_keyboard(),
-    )
+        f"Share your live location to check out at `{site}` (or /cancel).",
+        reply_markup=_location_keyboard(), parse_mode="Markdown")
 
 
 async def assisted_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Proxy check-in: /assisted <target_chat_id> <reason...>."""
     chat_id, name = _me(update)
-    if not _auth(context).has_capability(chat_id, "check_in"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="assisted",
+                                    hint="Re-send your /assisted command.")
+        return
+    if not _auth(context).has_capability(chat_id, "check_in", site):
         await update.message.reply_text("Assisted check-in needs an approved account.")
         return
     parts = (update.message.text or "").split(maxsplit=2)
@@ -135,10 +137,6 @@ async def assisted_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     _, target, reason = parts
     service = _attendance(context)
-    site = _resolve_site(update, context)
-    if site is None:
-        await _ask_site(update, context, resume="assisted")
-        return
     try:
         event = service.assisted_check_in(
             target.strip(), chat_id, date.today().isoformat(), reason,
@@ -160,10 +158,11 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     chat_id, _ = _me(update)
     service = _attendance(context)
-    site = _resolve_site(update, context)
+    site = site_session.resolve_site(update, context)
     if site is None:
-        context.user_data["pending_location_action"] = state
-        await _ask_site(update, context, resume="location")
+        await site_session.ask_site(
+            update, context, resume=state,
+            hint="Share your location again.")
         return
     loc = update.message.location
     fence = _fence(context, site)
@@ -191,21 +190,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Checked {kind} ({event.location_verdict or 'unchecked'}).",
         reply_markup=ReplyKeyboardRemove())
     await _route_to_confirmer(update, context, event)
-
-
-async def _ask_site(update: Update, context: ContextTypes.DEFAULT_TYPE, resume: str) -> None:
-    """Ask multi-site users to pick their active site first."""
-    chat_id, _ = _me(update)
-    auth = _auth(context)
-    site_ids = auth.sites_for_user(chat_id)
-    if not site_ids:
-        await update.effective_message.reply_text("No site membership - ask an admin.")
-        return
-    context.user_data["pending_site_action"] = resume
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(sid, callback_data=f"att_site:{sid}"),
-    ] for sid in site_ids])
-    await update.effective_message.reply_text("Which site?", reply_markup=keyboard)
 
 
 async def _route_to_confirmer(update, context, event) -> None:
@@ -249,23 +233,6 @@ async def handle_attendance_callback(update: Update, context: ContextTypes.DEFAU
     chat_id, _ = _me(update)
     service = _attendance(context)
 
-    if data.startswith("att_site:"):
-        site_id = data.split(":", 1)[1]
-        auth = _auth(context)
-        if site_id not in auth.sites_for_user(chat_id):
-            await query.edit_message_text("Not a member of that site.")
-            return
-        context.user_data["active_site"] = site_id
-        resume = context.user_data.pop("pending_site_action", None)
-        await query.edit_message_text(f"Active site: `{site_id}`.")
-        if resume == "location":
-            await query.edit_message_text(
-                f"Active site: `{site_id}`. Share your location again please.")
-        elif resume == "assisted":
-            await query.edit_message_text(
-                f"Active site: `{site_id}`. Re-send your /assisted command please.")
-        return
-
     parts = data.split(":")
     if len(parts) != 2:
         return
@@ -275,12 +242,20 @@ async def handle_attendance_callback(update: Update, context: ContextTypes.DEFAU
     except ValueError:
         return
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=data,
+                                    hint="Press the button again.")
+        return
+    if not _auth(context).has_capability(chat_id, "manage_attendance", site):
+        await query.edit_message_text(
+            f"Needs an attendance manager at your active site (`{site}`); "
+            "switch with /site if needed.")
+        return
+
     if action == "att_confirm":
-        if not _auth(context).has_capability(chat_id, "manage_attendance"):
-            await query.edit_message_text("Confirmation needs an attendance manager.")
-            return
         try:
-            event = service.confirm(event_id, chat_id)
+            event = service.confirm(event_id, chat_id, site_id=site)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not confirm: {e}")
             return
@@ -288,10 +263,8 @@ async def handle_attendance_callback(update: Update, context: ContextTypes.DEFAU
         await _notify(context, event.chat_id,
                       f"Your check-{event.check_type} was confirmed.")
     elif action == "att_dispute":
-        if not _auth(context).has_capability(chat_id, "manage_attendance"):
-            await query.edit_message_text("Disputes need an attendance manager.")
-            return
         context.user_data["att_dispute_id"] = event_id
+        context.user_data["att_dispute_event_site"] = site
         context.user_data["state"] = "awaiting_att_note"
         await query.edit_message_text("Send the dispute reason.")
 
@@ -304,12 +277,14 @@ async def handle_att_note(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id, _ = _me(update)
     service = _attendance(context)
     try:
-        event = service.dispute(context.user_data.get("att_dispute_id"),
-                                chat_id, note)
+        event = service.dispute(
+            context.user_data.get("att_dispute_id"), chat_id, note,
+            site_id=context.user_data.get("att_dispute_event_site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not dispute: {e}")
         return
     context.user_data.pop("att_dispute_id", None)
+    context.user_data.pop("att_dispute_event_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Disputed attendance #{event.id}.")
     await _notify(context, event.chat_id,

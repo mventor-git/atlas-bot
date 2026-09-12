@@ -1,4 +1,4 @@
-"""Discipline handlers: HQ file flow, queue, decide/appeal (018)."""
+"""Discipline handlers: HQ file flow, queue, decide/appeal (018; Phase 1 site-scoped)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from app.bot import site_session
 from app.models.discipline import DisciplineCase, DisciplineStatus
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -55,16 +56,16 @@ def _render(case: DisciplineCase) -> str:
     return "\n".join(lines)
 
 
-def _queue_buttons(chat_id: str, context, case: DisciplineCase):
+def _queue_buttons(chat_id: str, context, case: DisciplineCase, site: str):
     auth = _auth(context)
     buttons = []
     if case.status in (DisciplineStatus.FILED, DisciplineStatus.APPEALED) and \
-            auth.has_capability(chat_id, "review_disciplinary_case"):
+            auth.has_capability(chat_id, "review_disciplinary_case", site):
         buttons.append(
             [InlineKeyboardButton("Take into review",
                                   callback_data=f"disc_review:{case.id}")])
     if case.status in (DisciplineStatus.UNDER_REVIEW, DisciplineStatus.APPEALED) and \
-            auth.has_capability(chat_id, "approve_disciplinary_action") and \
+            auth.has_capability(chat_id, "approve_disciplinary_action", site) and \
             str(chat_id) != str(case.filed_by):
         buttons.append(
             [InlineKeyboardButton("Decide",
@@ -77,7 +78,12 @@ def _queue_buttons(chat_id: str, context, case: DisciplineCase):
 async def discipline_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """File a case: /discipline <subject_chat_id> <summary...>."""
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "review_disciplinary_case"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="discipline",
+                                    hint="Re-send your /discipline command.")
+        return
+    if not _auth(context).has_capability(chat_id, "review_disciplinary_case", site):
         await update.effective_message.reply_text("Discipline filing is HQ-only.")
         return
     parts = (update.message.text or "").split(maxsplit=2)
@@ -87,24 +93,30 @@ async def discipline_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     _, subject, summary = parts
     try:
-        case = _discipline(context).file(subject.strip(), chat_id, summary)
+        case = _discipline(context).file(subject.strip(), chat_id, summary,
+                                         site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not file: {e}")
         return
     await update.effective_message.reply_text(
-        f"Discipline case `#{case.id}` filed against `{subject.strip()}`.",
-        parse_mode="Markdown")
+        f"Discipline case `#{case.id}` filed against `{subject.strip()}` "
+        f"at `{site}`.", parse_mode="Markdown")
 
 
 # --- queues ---
 
 async def mydiscipline_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cases against the caller, across their own sites (SELF visibility)."""
     chat_id, _ = _me(update)
-    rows = _discipline(context)._repo.for_subject(chat_id)
+    auth = _auth(context)
+    service = _discipline(context)
+    rows = []
+    for site in auth.sites_for_user(chat_id):
+        rows.extend(service.list_against(chat_id, site_id=site))
     if not rows:
         await update.effective_message.reply_text("No discipline cases against you.")
         return
-    for case in rows[:10]:
+    for case in sorted(rows, key=lambda c: c.created_at)[:10]:
         markup = None
         if case.status == DisciplineStatus.DECIDED and \
                 str(case.subject_chat_id) == chat_id:
@@ -117,17 +129,22 @@ async def mydiscipline_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def discipline_queue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "review_disciplinary_case"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume="queue",
+                                    hint="Press /discipline_queue again.")
+        return
+    if not _auth(context).has_capability(chat_id, "review_disciplinary_case", site):
         await update.effective_message.reply_text("Discipline queue is HQ-only.")
         return
-    rows = _discipline(context)._repo.open_cases()
+    rows = _discipline(context).open_cases(site_id=site)
     if not rows:
         await update.effective_message.reply_text("Discipline queue is empty.")
         return
     for case in rows[:10]:
         await update.effective_message.reply_text(
             _render(case), parse_mode="Markdown",
-            reply_markup=_queue_buttons(chat_id, context, case))
+            reply_markup=_queue_buttons(chat_id, context, case, site))
 
 
 # --- callbacks ---
@@ -139,6 +156,12 @@ async def handle_discipline_callback(update: Update, context: ContextTypes.DEFAU
     chat_id, _ = _me(update)
     service = _discipline(context)
 
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=data,
+                                    hint="Press the button again.")
+        return
+
     parts = data.split(":")
     if len(parts) != 2:
         return
@@ -149,37 +172,39 @@ async def handle_discipline_callback(update: Update, context: ContextTypes.DEFAU
         return
 
     if action == "disc_review":
-        case = service._repo.get_by_id(case_id)
+        case = service.get(case_id, site_id=site)
         if case is None or not _auth(context).has_capability(
-                chat_id, "review_disciplinary_case"):
-            await query.edit_message_text("Review is HQ-only.")
+                chat_id, "review_disciplinary_case", site):
+            await query.edit_message_text("Review is HQ-only (check /site).")
             return
         try:
-            case = service.review(case_id, chat_id)
+            case = service.review(case_id, chat_id, site_id=site)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not review: {e}")
             return
         await query.edit_message_text(
             f"Case `#{case.id}` is now under review.", parse_mode="Markdown")
     elif action == "disc_decide":
-        case = service._repo.get_by_id(case_id)
+        case = service.get(case_id, site_id=site)
         if case is None or not _auth(context).has_capability(
-                chat_id, "approve_disciplinary_action"):
+                chat_id, "approve_disciplinary_action", site):
             await query.edit_message_text("Decisions need HQ approval rights.")
             return
         if str(chat_id) == str(case.filed_by):
             await query.edit_message_text("Filer cannot decide their own filing.")
             return
         context.user_data["disc_decide_id"] = case_id
+        context.user_data["disc_decide_site"] = site
         context.user_data["state"] = "awaiting_disc_note"
         await query.edit_message_text(
             "Send outcome and note as: `<outcome> | <note>`.")
     elif action == "disc_appeal":
-        case = service._repo.get_by_id(case_id)
+        case = service.get(case_id, site_id=site)
         if case is None or str(case.subject_chat_id) != chat_id:
             await query.edit_message_text("Only the subject may appeal this case.")
             return
         context.user_data["disc_appeal_id"] = case_id
+        context.user_data["disc_appeal_site"] = site
         context.user_data["state"] = "awaiting_disc_appeal"
         await query.edit_message_text("Send your appeal note.")
 
@@ -194,11 +219,13 @@ async def handle_disc_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id, _ = _me(update)
     try:
         case = _discipline(context).decide(
-            context.user_data.get("disc_decide_id"), chat_id, outcome, note)
+            context.user_data.get("disc_decide_id"), chat_id, outcome, note,
+            site_id=context.user_data.get("disc_decide_site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not decide: {e}")
         return
     context.user_data.pop("disc_decide_id", None)
+    context.user_data.pop("disc_decide_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Decided case `#{case.id}`: {outcome}.",
                                     parse_mode="Markdown")
@@ -214,11 +241,13 @@ async def handle_disc_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id, _ = _me(update)
     try:
         case = _discipline(context).appeal(
-            context.user_data.get("disc_appeal_id"), chat_id, note)
+            context.user_data.get("disc_appeal_id"), chat_id, note,
+            site_id=context.user_data.get("disc_appeal_site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not appeal: {e}")
         return
     context.user_data.pop("disc_appeal_id", None)
+    context.user_data.pop("disc_appeal_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Appealed case `#{case.id}` - back to review.",
                                     parse_mode="Markdown")

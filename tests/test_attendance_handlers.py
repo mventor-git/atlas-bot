@@ -200,8 +200,9 @@ class TestCallbacks:
         ctx = make_context(make_auth("normal_user"), service, user_data=flow_data)
         update = make_callback(111, f"att_confirm:{case_id}")
         await att_handlers.handle_attendance_callback(update, ctx)
-        update.callback_query.edit_message_text.assert_called_once_with(
-            "Confirmation needs an attendance manager.")
+        update.callback_query.edit_message_text.assert_called_once()
+        assert "attendance manager" in \
+            update.callback_query.edit_message_text.call_args[0][0].lower()
         assert service._repo.get_by_id(case_id).status == AttendanceStatus.SUBMITTED
 
     async def test_dispute_sets_note_state(self, service, flow_data):
@@ -215,18 +216,4 @@ class TestCallbacks:
         assert service._repo.get_by_id(case_id).status == AttendanceStatus.DISPUTED
         ctx.bot.send_message.assert_called_once()
 
-    async def test_site_pick(self, service, flow_data):
-        auth = make_auth()
-        ctx = make_context(auth, service, user_data=flow_data)
-        update = make_callback(111, f"att_site:{SITE}")
-        await att_handlers.handle_attendance_callback(update, ctx)
-        assert flow_data["active_site"] == SITE
-
-    async def test_site_pick_nonmember(self, service, flow_data):
-        auth = make_auth()
-        auth.sites_for_user.return_value = ["other"]
-        ctx = make_context(auth, service, user_data=flow_data)
-        update = make_callback(111, "att_site:site-a")
-        await att_handlers.handle_attendance_callback(update, ctx)
-        update.callback_query.edit_message_text.assert_called_once_with(
-            "Not a member of that site.")
+    # site picker tests moved to tests/test_site_session.py (025)

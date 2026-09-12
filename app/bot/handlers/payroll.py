@@ -1,10 +1,11 @@
-"""Payroll handlers: runs, salaries, self-service (021)."""
+"""Payroll handlers: runs, salaries, self-service (021; Phase 1 site-scoped)."""
 
 from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from app.bot import site_session
 from app.models.payroll import PayrollRunStatus
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -28,16 +29,23 @@ def _payroll(context: ContextTypes.DEFAULT_TYPE):
     return context.bot_data["payroll_service"]
 
 
-def _require_payroll(update: Update, context) -> str | None:
+async def _officer(update: Update, context, resume: str) -> tuple[str, str] | None:
+    """Resolve active site + manage_payroll gate; None = handled (asked/denied)."""
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "manage_payroll"):
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=resume,
+                                    hint="Repeat your payroll command.")
         return None
-    return chat_id
+    if not _auth(context).has_capability(chat_id, "manage_payroll", site):
+        await update.effective_message.reply_text("Payroll needs HQ rights.")
+        return None
+    return chat_id, site
 
 
 def _render_run(run, lines) -> str:
     total = round(sum(line.net for line in lines), 2)
-    head = [f"*Payroll {run.period}* - `{run.status}`",
+    head = [f"*Payroll {run.period}* - `{run.status}` - site `{run.site_id}`",
             f"Lines: {len(lines)} | Total: {total:g}"]
     for line in lines[:20]:
         head.append(f"`{line.chat_id}`: base {line.base_pay:g} + OT "
@@ -52,29 +60,30 @@ def _render_run(run, lines) -> str:
 
 async def payroll_build_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Open a draft run: /payroll_build <YYYY-MM>."""
-    by = _require_payroll(update, context)
-    if by is None:
-        await update.effective_message.reply_text("Payroll runs are HQ-only.")
+    officer = await _officer(update, context, "payroll_build")
+    if officer is None:
         return
+    by, site = officer
     parts = (update.message.text or "").split()
     if len(parts) != 2:
         await update.effective_message.reply_text("Usage: /payroll_build <YYYY-MM>")
         return
     try:
-        run = _payroll(context).create_run(parts[1], by)
+        run = _payroll(context).create_run(parts[1], by, site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not build: {e}")
         return
     await update.effective_message.reply_text(
-        f"Draft payroll `{run.period}` opened (#{run.id}). "
+        f"Draft payroll `{run.period}` opened at `{site}` (#{run.id}). "
         "Add lines with /payroll_add.", parse_mode="Markdown")
 
 
 async def payroll_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Add a line: /payroll_add <YYYY-MM> <chat_id> [ot_hours] [advances] [deductions]."""
-    if _require_payroll(update, context) is None:
-        await update.effective_message.reply_text("Payroll runs are HQ-only.")
+    officer = await _officer(update, context, "payroll_add")
+    if officer is None:
         return
+    _, site = officer
     parts = (update.message.text or "").split()
     if len(parts) < 3:
         await update.effective_message.reply_text(
@@ -88,20 +97,19 @@ async def payroll_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     while len(numbers) < 3:
         numbers.append(0.0)
     service = _payroll(context)
-    run = service._repo.get_by_period(parts[1])
+    run = service.get_run(parts[1], site_id=site)
     if run is None:
         await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
                                                   parse_mode="Markdown")
         return
-    user = service._users.get_by_chat_id(parts[2])
-    if user is None or user.monthly_salary is None:
+    salary = service.user_salary(parts[2])
+    if salary is None:
         await update.effective_message.reply_text(
             f"No salary stored for `{parts[2]}` - set it with /salary first.",
             parse_mode="Markdown")
         return
     try:
-        line = service.add_line(run.id, parts[2], user.monthly_salary,
-                                *numbers)
+        line = service.add_line(run.id, parts[2], salary, *numbers, site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not add: {e}")
         return
@@ -111,55 +119,58 @@ async def payroll_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def payroll_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """View a run: /payroll_view <YYYY-MM>."""
-    if _require_payroll(update, context) is None:
-        await update.effective_message.reply_text("Payroll runs are HQ-only.")
+    officer = await _officer(update, context, "payroll_view")
+    if officer is None:
         return
+    _, site = officer
     parts = (update.message.text or "").split()
     if len(parts) != 2:
         await update.effective_message.reply_text("Usage: /payroll_view <YYYY-MM>")
         return
     service = _payroll(context)
-    run = service._repo.get_by_period(parts[1])
+    run = service.get_run(parts[1], site_id=site)
     if run is None:
         await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
                                                   parse_mode="Markdown")
         return
     await update.effective_message.reply_text(
-        _render_run(run, service._repo.lines_for(run.id)), parse_mode="Markdown")
+        _render_run(run, service.lines(run)), parse_mode="Markdown")
 
 
 async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lock a run at export: /payroll_export <YYYY-MM> (021b emits the PDF)."""
-    if _require_payroll(update, context) is None:
-        await update.effective_message.reply_text("Payroll runs are HQ-only.")
+    officer = await _officer(update, context, "payroll_export")
+    if officer is None:
         return
+    _, site = officer
     parts = (update.message.text or "").split()
     if len(parts) != 2:
         await update.effective_message.reply_text("Usage: /payroll_export <YYYY-MM>")
         return
     service = _payroll(context)
-    run = service._repo.get_by_period(parts[1])
+    run = service.get_run(parts[1], site_id=site)
     if run is None:
         await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
                                                   parse_mode="Markdown")
         return
     try:
-        run = service.mark_exported(run.id)
+        run = service.mark_exported(run.id, site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not export: {e}")
         return
     await update.effective_message.reply_text(
         f"Payroll `{run.period}` exported and locked "
-        f"({len(service._repo.lines_for(run.id))} lines). PDF in 021b.",
+        f"({len(service.lines(run))} lines). PDF in 021b.",
         parse_mode="Markdown")
 
 
 # --- self-service ---
 
 async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show my line: /mypay <YYYY-MM>."""
+    """Show my line(s): /mypay <YYYY-MM> (own data across member sites)."""
     chat_id, _ = _me(update)
-    if not _auth(context).has_capability(chat_id, "view_own_payroll"):
+    auth = _auth(context)
+    if not auth.sites_for_user(chat_id):
         await update.effective_message.reply_text("Payroll view needs an approved account.")
         return
     parts = (update.message.text or "").split()
@@ -167,33 +178,34 @@ async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.effective_message.reply_text("Usage: /mypay <YYYY-MM>")
         return
     service = _payroll(context)
-    run = service._repo.get_by_period(parts[1])
-    if run is None:
-        await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
-                                                  parse_mode="Markdown")
-        return
-    mine = [line for line in service._repo.lines_for(run.id)
-            if str(line.chat_id) == chat_id]
+    mine, statuses = [], []
+    for site in auth.sites_for_user(chat_id):   # SELF: only sites they belong to
+        run = service.get_run(parts[1], site_id=site)
+        if run is None:
+            continue
+        line = next((l for l in service.lines(run)
+                     if str(l.chat_id) == chat_id), None)
+        if line is not None:
+            mine.append((run, line))
+            statuses.append(run.status)
     if not mine:
         await update.effective_message.reply_text("No payroll line for you.")
         return
-    (line,) = mine
-    status = run.status
-    if run.status != PayrollRunStatus.EXPORTED:
-        status += " (provisional)"
-    await update.effective_message.reply_text(
-        f"*{run.period}* - `{status}`\nBase {line.base_pay:g} + OT "
-        f"{line.ot_amount:g} - adv {line.advances:g} - ded "
-        f"{line.deductions:g} = *{line.net:g}*.",
-        parse_mode="Markdown")
+    for run, line in mine:
+        status = run.status
+        if run.status != PayrollRunStatus.EXPORTED:
+            status += " (provisional)"
+        await update.effective_message.reply_text(
+            f"*{run.period}* at `{run.site_id}` - `{status}`\nBase "
+            f"{line.base_pay:g} + OT {line.ot_amount:g} - adv "
+            f"{line.advances:g} - ded {line.deductions:g} = *{line.net:g}*.",
+            parse_mode="Markdown")
 
-
-# --- salaries ---
 
 async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Set a salary: /salary <chat_id> <amount>."""
-    if _require_payroll(update, context) is None:
-        await update.effective_message.reply_text("Salaries are HQ-only.")
+    officer = await _officer(update, context, "salary")
+    if officer is None:
         return
     parts = (update.message.text or "").split()
     if len(parts) != 3:
@@ -201,12 +213,7 @@ async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     try:
         amount = float(parts[2])
-    except ValueError:
-        await update.effective_message.reply_text("Amount must be a number.")
-        return
-    service = _payroll(context)
-    try:
-        user = service._users.set_salary(parts[1], amount)
+        user = _payroll(context).set_salary(parts[1], amount)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not set: {e}")
         return
@@ -220,8 +227,7 @@ async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def salary_import_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start a CSV paste: /salary_import, then send chat_id,salary lines."""
-    if _require_payroll(update, context) is None:
-        await update.effective_message.reply_text("Salaries are HQ-only.")
+    if await _officer(update, context, "salary_import") is None:
         return
     context.user_data["state"] = "awaiting_salary_csv"
     await update.effective_message.reply_text(

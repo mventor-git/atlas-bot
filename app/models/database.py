@@ -426,7 +426,8 @@ class User:
     """ISO datetime of approval."""
 
     site_id: Optional[str] = None
-    """Assigned site (multi-site notify/print targeting; env SITE_ID when unset)."""
+    """LEGACY display label only (Phase 1): site membership authority is
+    user_site_memberships; never use for authorization or targeting."""
 
     monthly_salary: Optional[float] = None
     """Contracted monthly base pay (020 payroll; None = unset)."""

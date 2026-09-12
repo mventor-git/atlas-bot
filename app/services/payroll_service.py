@@ -132,6 +132,22 @@ class PayrollService:
         run.exported_at = datetime.now().isoformat()
         return self._repo.update(run)
 
+    # --- Queries (public for handlers; Phase 1 decoupling) ---
+
+    def get_run(self, period: str, site_id: str | None = None) -> Optional[PayrollRun]:
+        return self._repo.get_by_period(period, site_id=site_id)
+
+    def lines(self, run) -> list:
+        """Lines of a run already loaded through a site check."""
+        return self._repo.lines_for(run.id)
+
+    def user_salary(self, chat_id: str) -> Optional[float]:
+        user = self._users.get_by_chat_id(chat_id)
+        return user.monthly_salary if user else None
+
+    def set_salary(self, chat_id: str, amount: float):
+        return self._users.set_salary(chat_id, amount)
+
     # --- CSV import (chat_id,salary per line) ---
 
     def import_salaries(self, csv_text: str) -> dict:

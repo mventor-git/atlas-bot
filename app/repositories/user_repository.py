@@ -190,27 +190,16 @@ class UserRepository:
         return user
 
     def get_users_by_site(self, site_id: str | None = None) -> list[User]:
-        """Get all users assigned to a site, ordered by creation time."""
+        """LEGACY display query on the retired users.site_id label.
+
+        Never use for authorization or targeting (Phase 1 rule): use
+        AuthorizationService.chat_ids_for_site (memberships) instead.
+        """
         rows = self._db.execute(
             "SELECT * FROM users WHERE site_id = ? ORDER BY created_at ASC",
             (site_id or driver.site_id(),),
         ).fetchall()
         return [self._row_to_user(row) for row in rows]
-
-    def set_site(self, chat_id: str, site_id: str) -> Optional[User]:
-        """Assign a user to a site."""
-        user = self.get_by_chat_id(chat_id)
-        if user is None:
-            return None
-        user.site_id = site_id
-        user.updated_at = datetime.now().isoformat()
-        self._db.execute(
-            "UPDATE users SET site_id = ?, updated_at = ? WHERE chat_id = ?",
-            (site_id, user.updated_at, chat_id),
-        )
-        self._db.commit()
-        logger.info("User %s assigned to site %s", chat_id, site_id)
-        return user
 
     def set_salary(self, chat_id: str, amount: float) -> Optional[User]:
         """Set a user's contracted monthly base pay."""

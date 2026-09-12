@@ -39,6 +39,8 @@ def make_auth(role="hr"):
 
     auth = MagicMock(spec=AuthorizationService)
     auth.get_role.return_value = role
+    auth.resolve_active_site.side_effect = (lambda chat_id, session_site=None: session_site or 'default')
+    auth.sites_for_user.return_value = ['default']
     auth.has_capability.side_effect = (
         lambda chat_id, cap, site_id=None: cap in caps.for_role(role))
     return auth
@@ -102,7 +104,7 @@ class TestOfficer:
         update = make_update(111, "/payroll_build 2026-09")
         await payroll_handlers.payroll_build_command(update, ctx)
         update.effective_message.reply_text.assert_called_once_with(
-            "Payroll runs are HQ-only.")
+            "Payroll needs HQ rights.")
         assert service._repo.count() == 0
 
     async def test_add_needs_salary(self, service, flow_data):
@@ -135,7 +137,7 @@ class TestSelfService:
         update = make_update(111, "/mypay 2026-09")
         await payroll_handlers.mypay_command(update, ctx)
         assert update.effective_message.reply_text.call_args[0][0] == \
-            "No run for `2026-09`."
+            "No payroll line for you."
 
 
 class TestSalaries:
@@ -150,7 +152,7 @@ class TestSalaries:
         update = make_update(111, "/salary 111 13000")
         await payroll_handlers.salary_command(update, ctx)
         update.effective_message.reply_text.assert_called_once_with(
-            "Salaries are HQ-only.")
+            "Payroll needs HQ rights.")
 
     async def test_csv_paste(self, service, flow_data):
         ctx = make_context(make_auth(), service, flow_data)
