@@ -157,6 +157,26 @@ class TestApprove:
         assert stack["repo"].get_by_date(TODAY, site_id="other").status == \
             ReportStatus.FINAL
 
+    async def test_creator_cannot_self_approve_via_command(self, stack):
+        ctx = make_context(make_auth("project_manager"), stack, {})
+        _final(stack, by="222")
+        upd = make_update(222, "/approve")
+        await start_handlers.approve_command(upd, ctx)
+        assert "own report" in \
+            upd.effective_message.reply_text.call_args[0][0].lower()
+        assert stack["repo"].get_by_date(TODAY, site_id=SITE).status == \
+            ReportStatus.FINAL
+
+    async def test_creator_cannot_self_reject_via_command(self, stack):
+        ctx = make_context(make_auth("project_manager"), stack, {})
+        _final(stack, by="222")
+        upd = make_update(222, "/reject looks bad")
+        await start_handlers.reject_command(upd, ctx)
+        assert "own report" in \
+            upd.effective_message.reply_text.call_args[0][0].lower()
+        assert stack["repo"].get_by_date(TODAY, site_id=SITE).status == \
+            ReportStatus.FINAL
+
 
 class TestRejectResubmit:
     async def test_reject_needs_note(self, stack):

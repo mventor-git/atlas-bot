@@ -157,11 +157,23 @@ class ReportWorkflowService:
     ) -> Report:
         """Transition a report from Final to Approved (027).
 
+        Separation of duties (3.2): the creator cannot approve their own
+        report. Enforced here in the domain layer so no caller (buttons,
+        commands, future surfaces) can bypass it. Rejection on refusal:
+        nothing is mutated and no audit event is written.
+
         Args:
             report: The report to approve (must be FINAL).
             telegram_user: Reviewer (capability gate lives in handlers).
             note: Optional reviewer note (kept on the record).
         """
+        if str(report.telegram_user or "") == str(telegram_user or "") \
+                and report.telegram_user:
+            raise ReportLifecycleError(
+                "Report creator cannot approve their own report.",
+                current_status=report.status.value,
+                target_status=ReportStatus.APPROVED.value,
+            )
         self._validate_transition(report, ReportStatus.APPROVED)
 
         now = datetime.now().isoformat()
@@ -181,7 +193,22 @@ class ReportWorkflowService:
     def reject_report(
         self, report: Report, telegram_user: str, note: str
     ) -> Report:
-        """Transition a report from Final to Rejected (027, note required)."""
+        """Transition a report from Final to Rejected (027, note required).
+
+        Separation of duties (3.2): the creator cannot reject their own
+        report either - a self-rejection would be an unreviewed shortcut
+        back to draft. Creators spotting an error ask a reviewer; the
+        resubmit path stays creator-side.
+        """
+        if str(report.telegram_user or "") == str(telegram_user or "") \
+                and report.telegram_user:
+            raise ReportLifecycleError(
+                "Report creator cannot reject their own report; "
+                "ask a reviewer.",
+                current_status=report.status.value,
+                target_status=ReportStatus.REJECTED.value,
+            )
+        self._validate_transition(report, ReportStatus.REJECTED)
         self._validate_transition(report, ReportStatus.REJECTED)
         if not (note or "").strip():
             raise ReportLifecycleError(
@@ -271,6 +298,7 @@ class ReportWorkflowService:
         telegram_user: str = "system",
         today_str: str | None = None,
         site_id: str | None = None,
+        calendar=None,
     ) -> int:
         """Auto-finalize draft reports for today after the configured deadline.
 
@@ -286,6 +314,10 @@ class ReportWorkflowService:
             current_minute: Override minute (for testing). If None, uses system time.
             telegram_user: Who to attribute the auto-finalize action to
                            (default: "system").
+            site_id: Tenant site (defaults to deployment origin).
+            calendar: Optional WorkingCalendar for this site. When given and
+                the date is not a required workday, nothing is finalized
+                (3.1: calendar says not required -> scheduler must not act).
 
         Returns:
             Number of reports that were auto-finalized.
@@ -308,6 +340,14 @@ class ReportWorkflowService:
 
         if today_str is None:
             today_str = now.strftime("%Y-%m-%d")
+
+        if calendar is not None and not calendar.is_required_workday(today_str):
+            logger.info(
+                "Auto-finalize skipped for %s: non-working day per calendar.",
+                today_str,
+            )
+            return 0
+
         finalized_count = 0
 
         # Use get_by_date() which loads items (get_all() skips items for performance)
@@ -335,6 +375,34 @@ class ReportWorkflowService:
                 finalized_count, today_str,
             )
         return finalized_count
+
+    def auto_finalize_sites(
+        self,
+        site_ids: list,
+        calendar_for,
+        current_hour: int | None = None,
+        current_minute: int | None = None,
+        telegram_user: str = "system",
+        today_str: str | None = None,
+    ) -> dict:
+        """Explicit per-site auto-finalize loop (3.1 scheduler contract).
+
+        Each site is evaluated against ITS OWN calendar; one site being
+        off never suppresses another. Returns {site_id: finalized_count}.
+        No site's calendar is ever consulted for another site.
+        """
+        results: dict = {}
+        for site in site_ids or []:
+            calendar = calendar_for(site) if calendar_for else None
+            try:
+                results[site] = self.auto_finalize_drafts(
+                    current_hour=current_hour, current_minute=current_minute,
+                    telegram_user=telegram_user, today_str=today_str,
+                    site_id=site, calendar=calendar)
+            except Exception:
+                logger.exception("Auto-finalize failed for site %s", site)
+                results[site] = 0
+        return results
 
     def auto_lock_reports(self, telegram_user: str = "system",
                             site_id: str | None = None) -> int:
