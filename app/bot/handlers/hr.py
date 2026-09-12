@@ -52,11 +52,8 @@ def _role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     return _auth(context).get_role(chat_id)
 
 
-async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str) -> None:
-    try:
-        await context.bot.send_message(chat_id=int(chat_id), text=text)
-    except Exception as e:
-        logger.warning("Could not notify %s: %s", chat_id, e)
+def _req_date(req) -> str:
+    return (getattr(req, "created_at", "") or "")[:10]
 
 
 def _render(req: HRRequest) -> str:
@@ -297,8 +294,11 @@ async def handle_reject_note(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("hr_reject_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Rejected:\n{_render(req)}", parse_mode="Markdown")
-    await _notify(context, req.requester_chat_id,
-                  f"Your HR request #{req.id} was rejected.\nNote: {note}")
+    from app.bot.notify import notify
+
+    await notify(context, "leave_decision", req.requester_chat_id,
+                 req.site_id, reference=f"hr:{req.id}", date=_req_date(req),
+                 kind=req.request_type, verdict="rejected", note=note)
 
 
 async def handle_delegate_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -327,7 +327,12 @@ async def handle_delegate_target(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("hr_delegate_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Delegated to HR:\n{_render(req)}", parse_mode="Markdown")
-    await _notify(context, target, f"HR request #{req.id} delegated to you.\n{_render(req)}")
+    from app.bot.notify import notify
+
+    await notify(context, "case_update", target, req.site_id,
+                 reference=f"hr:{req.id}", date=_req_date(req),
+                 kind=req.request_type, ref=req.id,
+                 verdict="delegated to HQ", note="")
 
 
 async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -351,8 +356,12 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("state", None)
     await _after_approval(update, context, service, req)
     await update.message.reply_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
-    await _notify(context, req.requester_chat_id,
-                  f"Your HR request #{req.id} was approved.\nDeduct from: {month}")
+    from app.bot.notify import notify
+
+    await notify(context, "leave_decision", req.requester_chat_id,
+                 req.site_id, reference=f"hr:{req.id}", date=_req_date(req),
+                 kind=req.request_type, verdict="approved",
+                 note=f"Deduct from: {month}")
 
 
 async def _after_approval(update, context, service, req) -> None:
@@ -423,8 +432,12 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text(f"Could not confirm: {e}")
             return
         await query.edit_message_text(f"Confirmed:\n{_render(req)}", parse_mode="Markdown")
-        await _notify(context, req.requester_chat_id,
-                      f"Your HR request #{req.id} was confirmed by PM. Sent to HR.")
+        from app.bot.notify import notify
+
+        await notify(context, "leave_decision", req.requester_chat_id,
+                     req.site_id, reference=f"hr:{req.id}", date=_req_date(req),
+                     kind=req.request_type, verdict="PM-confirmed, sent to HR",
+                     note="")
     elif action == "hr_delegate":
         if not _auth(context).has_capability(chat_id, "delegate_hr_request", site):
             await query.edit_message_text("Delegation needs a PM account.")
@@ -458,8 +471,12 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return
             await _after_approval(update, context, service, decided)
             await query.edit_message_text(f"Approved:\n{_render(decided)}", parse_mode="Markdown")
-            await _notify(context, decided.requester_chat_id,
-                          f"Your HR request #{decided.id} was approved.")
+            from app.bot.notify import notify
+
+            await notify(context, "leave_decision", decided.requester_chat_id,
+                         decided.site_id, reference=f"hr:{decided.id}",
+                         date=_req_date(decided), kind=decided.request_type,
+                         verdict="approved", note="")
     elif action == "hr_reject":
         if not _auth(context).has_capability(chat_id, "decide_hr_request", site):
             await query.edit_message_text("Rejection needs an HR account.")
@@ -483,8 +500,12 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("state", None)
         await _after_approval(update, context, service, req)
         await query.edit_message_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
-        await _notify(context, req.requester_chat_id,
-                      f"Your HR request #{req.id} was approved.\nDeduct from: {month}")
+        from app.bot.notify import notify
+
+        await notify(context, "leave_decision", req.requester_chat_id,
+                     req.site_id, reference=f"hr:{req.id}", date=_req_date(req),
+                     kind=req.request_type, verdict="approved",
+                     note=f"Deduct from: {month}")
 
 
 def get_registration_handlers() -> list:
@@ -642,8 +663,13 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f"(total paid {status['paid']:g}). State: {status['state']}.")
     req = service.get(event.request_id, site_id=site)
     if req is not None:
-        await _notify(context, req.requester_chat_id,
-                      f"Payout recorded for HR request #{req.id}: {event.amount:g}.")
+        from app.bot.notify import notify
+
+        await notify(context, "case_update", req.requester_chat_id, site,
+                     reference=f"hr:{req.id}", date=_req_date(req),
+                     kind=f"{req.request_type} payout", ref=req.id,
+                     verdict=f"{event.amount:g} paid on {event.payout_date}",
+                     note=reference)
 
 
 async def deduct_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -676,9 +702,13 @@ async def deduct_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"(total deducted {status['deducted']:g}). State: {status['deduction_state']}.")
     req = service.get(event.request_id, site_id=site)
     if req is not None:
-        await _notify(context, req.requester_chat_id,
-                      f"Payroll deduction recorded for HR request #{req.id}: "
-                      f"{event.amount:g} ({event.period}).")
+        from app.bot.notify import notify
+
+        await notify(context, "case_update", req.requester_chat_id, site,
+                     reference=f"hr:{req.id}", date=_req_date(req),
+                     kind=f"{req.request_type} deduction", ref=req.id,
+                     verdict=f"{event.amount:g} deducted ({event.period})",
+                     note=reference)
 
 
 # --- Leave / mission / overtime conversational flows (011) ---
@@ -905,17 +935,19 @@ async def handle_board_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text("Unknown site.")
             return True
         # Memberships (not legacy users.site_id) decide who belongs here.
+        # Durable outbox: deduped, retried, restart-safe (031).
+        from datetime import date as _date
+
+        from app.bot.notify import notify
+
         targets = _auth(context).chat_ids_for_site(site_id)
-        sent, total = 0, 0
+        today = _date.today().isoformat()
+        queued = 0
         for chat in targets:
-            total += 1
-            try:
-                await context.bot.send_message(
-                    chat_id=int(chat),
-                    text=f"Reminder: no labor report for today ({site_id}). File it now.")
-                sent += 1
-            except Exception as e:
-                logger.warning("Notify failed for %s: %s", chat, e)
-        await query.edit_message_text(f"Notified {sent}/{total} members of `{site_id}`.")
+            await notify(context, "report_missing", chat, site_id,
+                         reference=f"missing:{today}", date=today)
+            queued += 1
+        await query.edit_message_text(
+            f"Queued {queued} reminder(s) for `{site_id}` members.")
         return True
     return False

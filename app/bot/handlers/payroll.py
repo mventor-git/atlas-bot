@@ -142,7 +142,7 @@ async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_T
     officer = await _officer(update, context, "payroll_export")
     if officer is None:
         return
-    _, site = officer
+    chat_id, site = officer
     parts = (update.message.text or "").split()
     if len(parts) != 2:
         await update.effective_message.reply_text("Usage: /payroll_export <YYYY-MM>")
@@ -162,6 +162,14 @@ async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_T
         f"Payroll `{run.period}` exported and locked "
         f"({len(service.lines(run))} lines). PDF in 021b.",
         parse_mode="Markdown")
+    from app.bot.notify import notify
+
+    auth = _auth(context)
+    for holder in auth.chat_ids_for_site(site, "manage_payroll"):
+        if str(holder) != str(chat_id):
+            await notify(context, "payroll_ready", holder, site,
+                         reference=f"payroll:{run.period}",
+                         date=run.period, period=run.period)
 
 
 # --- self-service ---

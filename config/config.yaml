@@ -145,3 +145,6 @@ notification:
   empty_template_file: "templates/empty-day.ots"  # Template for empty days
   check_interval_seconds: 30         # How often to check the time
   send_to_admin_only: false          # Send notifications to all users or only admins
+  notify_max_attempts: 4             # Outbox attempts before terminal failure
+  notify_retry_backoff_min: [1, 15, 60]  # Retry delays after attempt 1, 2, 3
+  escalation_after_min: 60           # Past deadline: escalate missing reports to reviewers

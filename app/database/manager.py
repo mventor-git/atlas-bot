@@ -1,4 +1,4 @@
-﻿"""
+"""
 Database connection manager for Labor-Report.
 
 Handles SQLite connection lifecycle, schema initialization,
@@ -392,6 +392,32 @@ CREATE TABLE IF NOT EXISTS attendance_claims (
 CREATE INDEX IF NOT EXISTS idx_attendance_day_site_date ON attendance_days(site_id, day_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_day_chat ON attendance_days(chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_claim_day ON attendance_claims(site_id, chat_id, day_date);
+
+-- Notification outbox (031 durable scheduler; new table, no migration needed)
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dedup_key TEXT NOT NULL UNIQUE,
+    recipient TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    ntype TEXT NOT NULL,
+    reference TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 4,
+    next_retry_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT,
+    acknowledged_at TEXT,
+    claimed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notify_due ON notification_outbox(status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_notify_site ON notification_outbox(site_id, status);
+CREATE INDEX IF NOT EXISTS idx_notify_ref ON notification_outbox(site_id, reference);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -746,6 +772,31 @@ CREATE TABLE IF NOT EXISTS attendance_claims (
 CREATE INDEX IF NOT EXISTS idx_attendance_day_site_date ON attendance_days(site_id, day_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_day_chat ON attendance_days(chat_id, site_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_claim_day ON attendance_claims(site_id, chat_id, day_date);
+
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id SERIAL PRIMARY KEY,
+    dedup_key TEXT NOT NULL UNIQUE,
+    recipient TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    ntype TEXT NOT NULL,
+    reference TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 4,
+    next_retry_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT,
+    acknowledged_at TEXT,
+    claimed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notify_due ON notification_outbox(status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_notify_site ON notification_outbox(site_id, status);
+CREATE INDEX IF NOT EXISTS idx_notify_ref ON notification_outbox(site_id, reference);
 """
 
 

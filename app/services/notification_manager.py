@@ -1,14 +1,13 @@
 """
-Notification Manager — Automated reminder service for Labor-Report. (NEW)
+Notification Manager — durable scheduled reminders for Atlas (031 rewrite).
 
-Sends scheduled Telegram notifications to users at configurable times:
-  - 9 AM  : "Workday started — create your report?"
-  - 11 AM : "Reminder — report not yet created"
-  - 2 PM  : "Final reminder — deadline approaching"
-  - 5 PM  : Auto-creates a no_report entry using empty-day.xlsx template
+Every scheduled send goes through the persistent outbox: enqueue with a
+deterministic dedup key, then dispatch with eligibility re-checks, failure
+classification, and backoff. The in-memory _sent_today set is gone; restarts
+can neither duplicate nor lose notifications.
 
-All times are evaluated in the configured timezone (config.yaml → timezone.name).
-The manager runs as a background asyncio task inside the bot application.
+Per-tick flow: for each configured site (isolated try/except), evaluate the
+site's WorkingCalendar, run that site's windows, then drain due outbox rows.
 """
 
 import asyncio
@@ -22,8 +21,10 @@ from telegram.ext import Application
 from app.database.manager import DatabaseManager
 from app.models.config import AppConfig
 from app.models.database import Report, ReportStatus
+from app.repositories.notification_repository import NotificationRepository
 from app.repositories.report_repository import ReportRepository
 from app.services.arabic_date_service import ArabicDateService
+from app.services.notification_outbox import NotificationOutbox
 from app.services.working_calendar import WorkingCalendar
 from app.utils.exceptions import DatabaseError
 
@@ -33,37 +34,6 @@ except ImportError:
     ZoneInfo = None  # type: ignore
 
 logger = logging.getLogger(__name__)
-
-
-# ─── Notification messages ─────────────────────────────────────────
-
-
-MORNING_REMINDER = (
-    "\U0001f305 *Good Morning!*\n\n"
-    "A new workday has started. Would you like to create today's labor report?\n\n"
-    "Use /new to start fresh, or /copy to copy yesterday's report."
-)
-
-LATE_MORNING_REMINDER = (
-    "\u23f0 *Reminder*\n\n"
-    "Today's labor report hasn't been created yet.\n"
-    "The deadline is at *2:00 PM*.\n\n"
-    "Use /new to create it now, or /start for the dashboard."
-)
-
-AFTERNOON_REMINDER = (
-    "\u26a0\ufe0f *Final Reminder*\n\n"
-    "The submission deadline is approaching!\n"
-    "Today's labor report is still missing.\n\n"
-    "Use /new to create it now before the deadline passes."
-)
-
-NO_REPORT_CREATED = (
-    "\U0001f4cb *End of Workday*\n\n"
-    "No labor report was created for today.\n"
-    "An empty day record has been saved.\n\n"
-    "If this is a mistake, use /new to create a report or contact your admin."
-)
 
 
 class NotificationManager:
@@ -86,6 +56,7 @@ class NotificationManager:
         application: Application,
         db_manager: DatabaseManager,
         config: AppConfig,
+        outbox: NotificationOutbox | None = None,
     ) -> None:
         """Initialize the notification manager.
 
@@ -93,18 +64,18 @@ class NotificationManager:
             application: The running Telegram bot Application (for bot access).
             db_manager: Database manager for querying users and creating reports.
             config: Application configuration (timezone + notification settings).
+            outbox: Durable outbox (built from db_manager when omitted).
         """
         self._app = application
         self._db = db_manager
         self._config = config
         self._repo = ReportRepository(db_manager)
-        # Stage 1 (028): single authoritative calendar policy for the
-        # deployment origin site (same times/messages as before).
-        self._calendar = WorkingCalendar(config)
+        self.outbox = outbox or NotificationOutbox(
+            NotificationRepository(db_manager),
+            max_attempts=config.notification.notify_max_attempts,
+            backoff_min=tuple(config.notification.notify_retry_backoff_min))
 
-        # Tracking state
-        self._sent_today: set[str] = set()
-        self._last_check_date: Optional[str] = None
+        # Tracking state (loop only; all send history is durable)
         self._task: Optional[asyncio.Task] = None
         self._running = False
 
@@ -175,75 +146,235 @@ class NotificationManager:
             logger.debug("Notification manager loop cancelled")
             raise
 
-    async def _check_and_notify(self) -> None:
-        """Check the current time and trigger notifications if applicable.
+    async def _check_and_notify(self, today_str=None, hour=None, minute=None) -> dict:
+        """One scheduler pass: per-site evaluation + outbox drain.
 
-        On holidays and Fridays, automatically creates a no_report entry
-        (if one doesn't exist) and skips all reminders.
+        Each site runs isolated (a site failure never stops the others);
+        each site uses its own WorkingCalendar. Returns {site: summary}.
+        Optional overrides make the pass deterministic for tests/cycles.
         """
         now = self._now()
-        today_str = now.strftime("%Y-%m-%d")
-        current_hour = now.hour
-        current_minute = now.minute
+        today_str = today_str or now.strftime("%Y-%m-%d")
+        hour = now.hour if hour is None else hour
+        minute = now.minute if minute is None else minute
 
-        # Reset daily tracking when date changes
-        if self._last_check_date != today_str:
-            logger.debug("New day detected: %s, resetting notification tracking", today_str)
-            self._sent_today.clear()
-            self._last_check_date = today_str
+        out: dict = {}
+        for site in self._site_ids():
+            try:
+                out[site] = await self._check_site(site, today_str, now,
+                                                   hour, minute)
+            except Exception as e:
+                logger.error("Site sweep failed for %s: %s", site, e,
+                             exc_info=True)
+                out[site] = {"error": str(e)[:120]}
+        await self._drain()
+        return out
+
+    async def run_cycle(self, today_str=None, hour=None,
+                        minute=None) -> dict:
+        """Deterministic single cycle (§28 trial utility + tests)."""
+        return await self._check_and_notify(today_str, hour, minute)
+
+    def pending_count(self, site_id=None) -> int:
+        return self._outbox_repo().pending_count(site_id)
+
+    def _outbox_repo(self):
+        from app.repositories.notification_repository import (
+            NotificationRepository)
+
+        return NotificationRepository(self._db)
+
+    def _outbox(self):
+        from app.services.notification_outbox import NotificationOutbox
 
         cfg = self._config.notification
+        return NotificationOutbox(
+            self._outbox_repo(), max_attempts=cfg.notify_max_attempts,
+            backoff_min=tuple(cfg.notify_retry_backoff_min))
 
-        # Check if today is a required workday (028: single policy)
-        required, reason = self._calendar.describe(today_str)
+    def _site_ids(self) -> list:
+        raw = getattr(self._config, "sites", None) or []
+        ids = [str(s.get("id")) for s in raw
+               if isinstance(s, dict) and s.get("id")]
+        if ids:
+            return ids
+        from app.database import driver
 
-        # On non-working days: auto-create no_report at 9 AM (start of day)
-        # and skip all notification reminders.
+        return [driver.site_id()]
+
+    async def _check_site(self, site: str, today_str: str, now: datetime,
+                          hour: int, minute: int) -> dict:
+        """Evaluate one site's windows; enqueue (never send directly)."""
+        from app.services.working_calendar import WorkingCalendar
+
+        cfg = self._config.notification
+        calendar = WorkingCalendar(self._config, site)
+        required, reason = calendar.describe(today_str)
+        done: dict = {"site": site, "required": required}
+
         if not required:
-            holiday_name = reason or "Holiday"
-            if self._is_time_match(current_hour, current_minute,
-                                    cfg.morning_reminder_hour, cfg.morning_reminder_minute):
-                has_report = self._has_today_report(today_str)
-                if not has_report:
-                    await self._auto_create_no_report(today_str, now)
-                    logger.info("Auto-created no_report for holiday: %s (%s)", today_str, holiday_name)
-            # Skip all other notifications on holidays
-            return
+            if self._is_time_match(hour, minute,
+                                   cfg.morning_reminder_hour,
+                                   cfg.morning_reminder_minute):
+                if not self._has_today_report(today_str, site):
+                    await self._auto_create_no_report(today_str, now, site)
+            done["skipped"] = reason
+            return done
 
-        # Check if report exists for today
-        has_report = self._has_today_report(today_str)
+        has_report = self._has_today_report(today_str, site)
+        creators = self._roster(site, "create_daily_report")
 
-        # Check each notification time window (±2 minute window)
-        # 9 AM — Morning reminder (always sends on working days)
-        if self._is_time_match(current_hour, current_minute,
-                                cfg.morning_reminder_hour, cfg.morning_reminder_minute):
-            await self._send_notification("morning", today_str)
+        def _enq(ntype, to, ref="", priority=0, level=0, **kw):
+            return self.outbox.enqueue(
+                ntype, to, site, reference=ref or f"missing:{today_str}",
+                priority=priority, level=level, date=today_str, **kw)
 
-        # 11 AM — Late morning reminder (only if no report)
-        if not has_report and self._is_time_match(current_hour, current_minute,
-                                                   cfg.late_morning_reminder_hour, cfg.late_morning_reminder_minute):
-            await self._send_notification("late_morning", today_str)
+        # 9 AM — Morning reminder (always on working days)
+        if self._is_time_match(hour, minute,
+                               cfg.morning_reminder_hour,
+                               cfg.morning_reminder_minute):
+            for uid in creators:
+                _enq("morning", uid)
+            done["morning"] = len(creators)
 
-        # 2 PM — Afternoon reminder (only if no report)
-        if not has_report and self._is_time_match(current_hour, current_minute,
-                                                   cfg.afternoon_reminder_hour, cfg.afternoon_reminder_minute):
-            await self._send_notification("afternoon", today_str)
+        # 11 AM / 2 PM — follow-ups only when missing
+        if not has_report:
+            if self._is_time_match(hour, minute,
+                                   cfg.late_morning_reminder_hour,
+                                   cfg.late_morning_reminder_minute):
+                for uid in creators:
+                    _enq("late_morning", uid)
+                done["late_morning"] = len(creators)
+            if self._is_time_match(hour, minute,
+                                   cfg.afternoon_reminder_hour,
+                                   cfg.afternoon_reminder_minute):
+                for uid in creators:
+                    _enq("afternoon", uid)
+                done["afternoon"] = len(creators)
+                await self._sweep_attendance(site, today_str)
+                await self._sweep_overtime(site, today_str)
 
-        # At/after deadline — Auto-finalize today's drafts (even if report exists)
-        # Uses >= check instead of window-match so it fires even if bot starts late.
+        # Escalation: past deadline + window, still missing -> reviewers
         auto_hour = self._config.lifecycle.auto_finalize_hour
         auto_min = self._config.lifecycle.auto_finalize_minute
-        if auto_hour >= 0:  # -1 disables auto-finalize
-            current_total = current_hour * 60 + current_minute
+        if auto_hour >= 0 and not has_report:
+            current_total = hour * 60 + minute
+            esc_total = (auto_hour * 60 + auto_min
+                         + cfg.escalation_after_min)
+            if current_total >= esc_total:
+                reviewers = self._roster(site, "approve_daily_report")
+                for uid in reviewers:
+                    _enq("report_missing", uid, priority=1, level=1)
+                done["escalated"] = len(reviewers)
+
+        # At/after deadline — finalize drafts (>= check: fires even if late)
+        if auto_hour >= 0:
+            current_total = hour * 60 + minute
             target_total = auto_hour * 60 + auto_min
             if current_total >= target_total:
-                await self._auto_finalize_today_drafts()
+                await self._auto_finalize_today_drafts([site])
 
-        # 5 PM — Auto-create no_report (only if no report exists)
-        if not has_report and self._is_time_match(current_hour, current_minute,
-                                                   cfg.auto_no_report_hour, cfg.auto_no_report_minute):
-            await self._auto_create_no_report(today_str, now)
-            await self._send_notification("no_report_created", today_str)
+        # 5 PM — auto-create no_report (only if missing) + tell creators
+        if not has_report and self._is_time_match(
+                hour, minute, cfg.auto_no_report_hour,
+                cfg.auto_no_report_minute):
+            await self._auto_create_no_report(today_str, now, site)
+            for uid in creators:
+                _enq("no_report_created", uid)
+            done["no_report"] = len(creators)
+
+        # Workflow-driven: FINAL awaiting review -> reviewers (deduped)
+        if has_report:
+            rep = self._repo.get_by_date(today_str, site_id=site)
+            if rep is not None and rep.status == ReportStatus.FINAL:
+                for uid in self._roster(site, "approve_daily_report"):
+                    _enq("report_review", uid, ref=f"review:{today_str}",
+                         priority=1)
+                done["review_queued"] = True
+        return done
+
+    async def _drain(self) -> dict:
+        """Deliver all due outbox rows with eligibility re-checks."""
+        bot = self._app.bot
+        auth = (self._app.bot_data or {}).get("authorization_service")
+
+        async def _send(to: str, text: str) -> None:
+            await bot.send_message(chat_id=int(to), text=text,
+                                   parse_mode="Markdown")
+
+        return await self.outbox.dispatch(_send, auth=auth)
+
+    def _roster(self, site: str, capability: str) -> set[str]:
+        """Capability holders at a site; empty (fail-closed) without auth."""
+        try:
+            auth = (self._app.bot_data or {}).get("authorization_service")
+            if auth is None:
+                logger.warning("No auth service: no roster for %s", site)
+                return set()
+            return set(auth.chat_ids_for_site(site, capability))
+        except Exception as e:
+            logger.error("Roster failed for %s: %s", site, e)
+            return set()
+
+    def _site_confirmer(self, site: str):
+        """Primary confirmer for attendance escalation (site config)."""
+        raw = getattr(self._config, "sites", None) or []
+        for entry in raw:
+            if isinstance(entry, dict) and str(entry.get("id")) == site:
+                for key in ("confirmer", "confirmer_fallback"):
+                    if entry.get(key):
+                        return str(entry[key])
+        return None
+
+    async def _sweep_attendance(self, site: str, today_str: str) -> int:
+        """Backstop: unresolved attendance days -> site confirmer (deduped)."""
+        try:
+            day_service = (self._app.bot_data or {}).get(
+                "attendance_day_service")
+            if day_service is None:
+                return 0
+            confirmer = self._site_confirmer(site)
+            if confirmer is None:
+                return 0
+            outbox = self.outbox
+            n = 0
+            for day in day_service.queue(today_str, site_id=site):
+                outbox.enqueue("attendance_pending", confirmer, site,
+                               reference=f"{today_str}:{day.chat_id}",
+                               subject=day.chat_id, kind="check-in",
+                               evidence="pending review", date=today_str)
+                n += 1
+            if n:
+                logger.info("Queued %d attendance confirmations for %s @%s",
+                            n, confirmer, site)
+            return n
+        except Exception as e:
+            logger.error("Attendance sweep failed for %s: %s", site, e)
+            return 0
+
+    async def _sweep_overtime(self, site: str, today_str: str) -> int:
+        """Backstop: pending overtime requests -> PMs (deduped)."""
+        try:
+            hr_service = (self._app.bot_data or {}).get("hr_service")
+            if hr_service is None or not hasattr(hr_service, "pending_overtime"):
+                return 0
+            outbox = self.outbox
+            pms = self._roster(site, "confirm_hr_request")
+            n = 0
+            for req in hr_service.pending_overtime(site_id=site):
+                for pm in pms:
+                    outbox.enqueue(
+                        "overtime_pending", pm, site,
+                        reference=f"overtime:{req.id}",
+                        subject=req.requester_chat_id,
+                        hours=getattr(req, "hours", "?"),
+                        date=getattr(req, "trip_date", None)
+                        or (req.created_at or "")[:10], priority=1)
+                    n += 1
+            return n
+        except Exception as e:
+            logger.error("Overtime sweep failed for %s: %s", site, e)
+            return 0
 
     # ─── Time helpers ─────────────────────────────────────────────
 
@@ -277,107 +408,18 @@ class NotificationManager:
 
     # ─── Database helpers ─────────────────────────────────────────
 
-    def _has_today_report(self, today_str: str) -> bool:
+    def _has_today_report(self, today_str: str, site: str | None = None) -> bool:
         """Check if a report exists for today (excluding no_report)."""
         try:
-            report = self._repo.get_by_date(today_str)
+            from app.database import driver
+
+            report = self._repo.get_by_date(
+                today_str, site_id=site or driver.site_id())
             if report is None:
                 return False
             return report.status != ReportStatus.NO_REPORT
         except Exception:
             return False
-
-    def _get_user_ids(self) -> set[str]:
-        """Reminder recipients for THIS deployment's origin site (Phase 1).
-
-        Membership + capability are the authority: only active members of
-        the origin site who can create daily reports (or hold
-        view_site_reports in admin-only mode) get the reminder. The old
-        all-approved broadcast leaked site B staff into site A's pings.
-        """
-        user_ids: set[str] = set()
-
-        try:
-            auth_service = self._app.bot_data.get("authorization_service")
-
-            if auth_service is None:
-                # Fallback: query distinct telegram_user values
-                # (no tenancy authority available here; single-site only).
-                query_tables = [
-                    "SELECT DISTINCT telegram_user FROM reports WHERE telegram_user IS NOT NULL",
-                    "SELECT DISTINCT telegram_user FROM event_log WHERE telegram_user IS NOT NULL",
-                    "SELECT DISTINCT telegram_user FROM recent_contractors WHERE telegram_user IS NOT NULL",
-                ]
-                for sql in query_tables:
-                    rows = self._db.execute(sql).fetchall()
-                    for row in rows:
-                        uid = str(row["telegram_user"]).strip()
-                        if uid:
-                            user_ids.add(uid)
-                return user_ids
-
-            from app.database import driver
-
-            origin = driver.site_id()
-            if self._config.notification.send_to_admin_only:
-                return set(auth_service.chat_ids_for_site(
-                    origin, "view_site_reports"))
-
-            return set(auth_service.chat_ids_for_site(
-                origin, "create_daily_report"))
-
-        except Exception as e:
-            logger.error("Failed to get user IDs: %s", e)
-            return user_ids
-
-    # ─── Notification sending ─────────────────────────────────────
-
-    async def _send_notification(self, notification_type: str, today_str: str) -> None:
-        """Send a notification and mark it as sent for today.
-
-        Args:
-            notification_type: Key for dedup tracking ('morning', 'late_morning', etc.).
-            today_str: Today's date string.
-        """
-        tracking_key = f"{today_str}:{notification_type}"
-
-        if tracking_key in self._sent_today:
-            return
-
-        message = self._get_message(notification_type)
-        user_ids = self._get_user_ids()
-
-        if not user_ids:
-            logger.info("No users to notify for %s", notification_type)
-            self._sent_today.add(tracking_key)
-            return
-
-        bot = self._app.bot
-        sent_count = 0
-
-        for uid in user_ids:
-            try:
-                await bot.send_message(
-                    chat_id=int(uid),
-                    text=message,
-                    parse_mode="Markdown",
-                )
-                sent_count += 1
-            except Exception as e:
-                logger.warning("Failed to send %s notification to user %s: %s", notification_type, uid, e)
-
-        logger.info("Sent %s notification to %d user(s) (type=%s)", sent_count, len(user_ids), notification_type)
-        self._sent_today.add(tracking_key)
-
-    def _get_message(self, notification_type: str) -> str:
-        """Get the message text for a notification type."""
-        messages = {
-            "morning": MORNING_REMINDER,
-            "late_morning": LATE_MORNING_REMINDER,
-            "afternoon": AFTERNOON_REMINDER,
-            "no_report_created": NO_REPORT_CREATED,
-        }
-        return messages.get(notification_type, "")
 
     # ─── Admin notification ───────────────────────────────────────
 
@@ -451,33 +493,30 @@ class NotificationManager:
 
     # ─── Auto-finalize ───────────────────────────────────────────
 
-    async def _auto_finalize_today_drafts(self) -> None:
+    async def _auto_finalize_today_drafts(self, site_ids=None) -> dict:
         """Auto-finalize today's draft reports at the configured deadline.
 
-        Retrieves the ``ReportWorkflowService`` from ``bot_data`` and runs
-        the explicit per-site loop: each configured site is evaluated
-        against ITS OWN WorkingCalendar, so a day off at one site never
-        suppresses (or triggers) finalization at another (3.1).
+        Explicit per-site loop (3.1 contract): each configured site is
+        evaluated against ITS OWN WorkingCalendar. Returns {site: count}.
+        Idempotent: FINAL-or-later rows are never refinalized; the
+        outbox dedups any notices derived from this.
         """
-        tracking_key = f"{self._last_check_date or 'unknown'}:auto_finalize"
-        if tracking_key in self._sent_today:
-            return
-
         try:
             workflow = self._app.bot_data.get("workflow_service")
             if workflow is None:
                 logger.warning("Workflow service not available for auto-finalize")
-                return
+                return {}
 
             from app.services.working_calendar import WorkingCalendar
 
-            raw_sites = getattr(self._config, "sites", None) or []
-            site_ids = [str(s.get("id")) for s in raw_sites
-                        if isinstance(s, dict) and s.get("id")]
-            if not site_ids:
-                from app.database import driver
+            if site_ids is None:
+                raw_sites = getattr(self._config, "sites", None) or []
+                site_ids = [str(s.get("id")) for s in raw_sites
+                            if isinstance(s, dict) and s.get("id")]
+                if not site_ids:
+                    from app.database import driver
 
-                site_ids = [driver.site_id()]
+                    site_ids = [driver.site_id()]
             counts = workflow.auto_finalize_sites(
                 site_ids,
                 lambda s: WorkingCalendar(self._config, s),
@@ -486,23 +525,30 @@ class NotificationManager:
             if total > 0:
                 logger.info("Auto-finalized draft report(s) at deadline: %s",
                             counts)
-                self._sent_today.add(tracking_key)
+            return counts
         except Exception as e:
             logger.error("Auto-finalize failed: %s", e, exc_info=True)
+            return {}
 
     # ─── Auto-create no_report ────────────────────────────────────
 
-    async def _auto_create_no_report(self, today_str: str, now: datetime) -> None:
+    async def _auto_create_no_report(self, today_str: str, now: datetime,
+                                       site: Optional[str] = None) -> None:
         """Create a no_report entry for today and optionally generate empty Excel.
 
         Args:
             today_str: Today's date string (YYYY-MM-DD).
             now: Current datetime (for day name formatting).
+            site: Tenant site (defaults to deployment origin).
         """
+        from app.database import driver
+
+        site = site or driver.site_id()
         try:
             # Check again if report exists (race condition guard)
-            if self._has_today_report(today_str):
-                logger.info("Report already exists for %s, skipping auto-create", today_str)
+            if self._has_today_report(today_str, site):
+                logger.info("Report already exists for %s @%s, skipping auto-create",
+                            today_str, site)
                 return
 
             # Parse the date for Arabic formatting
@@ -518,10 +564,11 @@ class NotificationManager:
                 day=day_name,
                 status=ReportStatus.NO_REPORT,
                 telegram_user="system",
+                site_id=site,
             )
 
             self._repo.add(report)
-            logger.info("Auto-created no_report entry for %s", today_str)
+            logger.info("Auto-created no_report entry for %s @%s", today_str, site)
 
             # Generate empty document using empty-day.ots template if available
             await self._generate_empty_doc(today_str)

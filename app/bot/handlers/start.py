@@ -752,6 +752,9 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                                                  role=role),
             parse_mode="Markdown",
         )
+        await _report_notice(context, "report_approved", report.telegram_user,
+                             site, report.date,
+                             reference=f"review:{report.date}")
     elif data == "reject_report":
         gated = await _review_gate(update, context)
         if gated is None:
@@ -799,6 +802,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             reply_markup=report_actions_keyboard(report.status.value, role=role),
             parse_mode="Markdown",
         )
+        await _notify_reviewers(context, site, "report_resubmitted", report.date)
 
     elif data == "view_report":
         try:
@@ -960,6 +964,7 @@ async def handle_confirmation_callback(update: Update, context: ContextTypes.DEF
                 workflow: ReportWorkflowService = context.bot_data["workflow_service"]
                 report = workflow.finalize_report(report, telegram_user)
                 msg = "Report finalized successfully!"
+                _cancel_notices(context, site, f"missing:{today}")
 
                 # Auto-generate and send the PDF
                 preview_service = context.bot_data.get("pdf_preview_service")
@@ -1784,6 +1789,43 @@ async def _review_gate(update, context) -> tuple[str, str] | None:
     return chat_id, site
 
 
+async def _report_notice(context, ntype, recipient, site, date_str, **fields):
+    """Durable workflow notice (031); silent when no outbox is wired."""
+    from app.bot.notify import notify
+
+    try:
+        await notify(context, ntype, recipient, site, date=date_str, **fields)
+    except Exception as e:
+        logger.warning("Report notice %s failed for %s: %s", ntype, recipient, e)
+
+
+def _cancel_notices(context, site: str, reference: str) -> None:
+    """Supersede stale pending notices after workflow progress."""
+    try:
+        outbox = (context.bot_data or {}).get("notification_outbox")
+        if outbox is not None:
+            outbox.cancel_for(site, reference)
+    except Exception as e:
+        logger.warning("Notice cancel failed for %s/%s: %s", site, reference, e)
+
+
+async def _notify_reviewers(context, site: str, ntype: str, date_str: str,
+                            **fields) -> None:
+    """Fan-out to approve_daily_report holders at a site."""
+    auth = (context.bot_data or {}).get("authorization_service")
+    if auth is None:
+        return
+    try:
+        reviewers = auth.chat_ids_for_site(site, "approve_daily_report")
+    except Exception as e:
+        logger.warning("Reviewer roster failed for %s: %s", site, e)
+        return
+    for reviewer in reviewers:
+        await _report_notice(context, ntype, reviewer, site, date_str,
+                             reference=f"review:{date_str}", priority=1,
+                             **fields)
+
+
 async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/approve [note] - reviewer accepts today's FINAL report."""
     gated = await _review_gate(update, context)
@@ -1815,6 +1857,8 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
     )
+    await _report_notice(context, "report_approved", report.telegram_user,
+                         site, report.date, reference=f"review:{report.date}")
 
 
 async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1849,6 +1893,9 @@ async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
     )
+    await _report_notice(context, "report_rejected", report.telegram_user,
+                         site, report.date, reference=f"review:{report.date}",
+                         reason=report.reject_note or "")
 
 
 async def resubmit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1882,6 +1929,7 @@ async def resubmit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
     )
+    await _notify_reviewers(context, site, "report_resubmitted", report.date)
 
 
 async def handle_report_reject_note(update: Update,
@@ -1921,6 +1969,10 @@ async def handle_report_reject_note(update: Update,
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
     )
+    await _report_notice(context, "report_rejected", report.telegram_user,
+                         saved_site, report.date,
+                         reference=f"review:{report.date}",
+                         reason=report.reject_note or "")
 
 
 def get_registration_handlers() -> list:

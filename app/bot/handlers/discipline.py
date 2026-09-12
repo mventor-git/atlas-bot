@@ -33,14 +33,6 @@ def _discipline(context: ContextTypes.DEFAULT_TYPE):
     return context.bot_data["discipline_service"]
 
 
-async def _notify(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str) -> None:
-    try:
-        await context.bot.send_message(chat_id=int(chat_id), text=text,
-                                       parse_mode="Markdown")
-    except Exception as e:
-        logger.warning("Could not notify %s: %s", chat_id, e)
-
-
 def _render(case: DisciplineCase) -> str:
     lines = [
         f"*Discipline #{case.id}* - `{case.status}`",
@@ -101,6 +93,17 @@ async def discipline_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.effective_message.reply_text(
         f"Discipline case `#{case.id}` filed against `{subject.strip()}` "
         f"at `{site}`.", parse_mode="Markdown")
+    from app.bot.notify import notify
+
+    for reviewer in _auth(context).chat_ids_for_site(
+            site, "review_disciplinary_case"):
+        if str(reviewer) != str(chat_id):
+            await notify(context, "case_update", reviewer, site,
+                         reference=f"discipline:{case.id}",
+                         date=(case.created_at or "")[:10],
+                         kind="discipline", ref=case.id,
+                         verdict="filed - needs triage",
+                         note=summary[:120])
 
 
 # --- queues ---
@@ -229,8 +232,12 @@ async def handle_disc_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Decided case `#{case.id}`: {outcome}.",
                                     parse_mode="Markdown")
-    await _notify(context, case.subject_chat_id,
-                  f"Discipline case `#{case.id}` decided: {outcome} - {note}")
+    from app.bot.notify import notify
+
+    await notify(context, "discipline_decision", case.subject_chat_id,
+                 case.site_id, reference=f"discipline:{case.id}",
+                 date=(case.created_at or "")[:10], ref=case.id,
+                 verdict=outcome, note=note)
 
 
 async def handle_disc_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -251,6 +258,16 @@ async def handle_disc_appeal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("state", None)
     await update.message.reply_text(f"Appealed case `#{case.id}` - back to review.",
                                     parse_mode="Markdown")
+    from app.bot.notify import notify
+
+    for reviewer in _auth(context).chat_ids_for_site(
+            case.site_id, "approve_disciplinary_action"):
+        if str(reviewer) != str(chat_id):
+            await notify(context, "case_update", reviewer, case.site_id,
+                         reference=f"discipline:{case.id}",
+                         date=(case.created_at or "")[:10],
+                         kind="discipline", ref=case.id,
+                         verdict="appealed - back to review", note=note)
 
 
 def get_registration_handlers() -> list:
