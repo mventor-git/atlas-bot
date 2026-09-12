@@ -57,6 +57,7 @@ def create_bot_app(
     hr_service=None,
     user_repository=None,
     attendance_service=None,
+    attendance_day_service=None,
     case_service=None,
     discipline_service=None,
     payroll_service=None,
@@ -98,6 +99,7 @@ def create_bot_app(
     app.bot_data["hr_service"] = hr_service
     app.bot_data["user_repository"] = user_repository
     app.bot_data["attendance_service"] = attendance_service
+    app.bot_data["attendance_day_service"] = attendance_day_service
     app.bot_data["case_service"] = case_service
     app.bot_data["discipline_service"] = discipline_service
     app.bot_data["payroll_service"] = payroll_service

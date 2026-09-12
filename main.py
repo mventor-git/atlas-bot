@@ -60,6 +60,8 @@ from app.services.payroll_service import PayrollService
 from app.repositories.payroll_repository import PayrollRepository
 from app.services.attendance_service import AttendanceService
 from app.repositories.attendance_repository import AttendanceRepository
+from app.services.attendance_day_service import AttendanceDayService
+from app.repositories.attendance_day_repository import AttendanceDayRepository
 from app.services.audit_service import AuditService
 from app.libre.filler import TemplateFiller
 from app.libre.pdf import PDFGenerator
@@ -267,6 +269,9 @@ def main() -> None:
         daily_comparison_service = DailyComparisonService(report_repo_with_events)  # mventor-ticket-019
         hr_service = HRService(HRRepository(db_manager), MoneyRepository(db_manager))  # HR advances + transport
         attendance_service = AttendanceService(AttendanceRepository(db_manager))
+        day_repo = AttendanceDayRepository(db_manager)
+        attendance_day_service = AttendanceDayService(
+            day_repo, AttendanceRepository(db_manager))
         case_service = CaseService(CaseRepository(db_manager))
         discipline_service = DisciplineService(DisciplineRepository(db_manager))
 
@@ -313,6 +318,7 @@ def main() -> None:
             hr_service=hr_service,
             user_repository=user_repo,
             attendance_service=attendance_service,
+            attendance_day_service=attendance_day_service,
             case_service=case_service,
             discipline_service=discipline_service,
             payroll_service=payroll_service,
