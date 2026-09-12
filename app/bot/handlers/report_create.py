@@ -696,6 +696,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             from app.bot.handlers import attendance as att_handlers
 
             await att_handlers.handle_att_note(update, context)
+        elif state == "awaiting_day_note":
+            from app.bot.handlers import attendance as att_handlers
+
+            await att_handlers.handle_day_dispute_note(update, context)
+        elif state == "awaiting_day_resolve":
+            from app.bot.handlers import attendance as att_handlers
+
+            await att_handlers.handle_day_resolve(update, context)
+        elif state == "awaiting_claim_note":
+            from app.bot.handlers import attendance as att_handlers
+
+            await att_handlers.handle_claim_note(update, context)
         elif state == "awaiting_case_summary":
             from app.bot.handlers import cases as case_handlers
 

@@ -346,6 +346,48 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
 
 CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
 CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
+
+-- Attendance days (026 day model; events stay the evidence layer)
+CREATE TABLE IF NOT EXISTS attendance_days (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    day_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'confirmed', 'disputed', 'resolved')),
+    origin TEXT NOT NULL DEFAULT 'none'
+        CHECK (origin IN ('self', 'assisted', 'none')),
+    first_in TEXT,
+    last_out TEXT,
+    late_minutes INTEGER,
+    verdict TEXT,
+    resolution_note TEXT,
+    resolved_by TEXT,
+    dispute_note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    UNIQUE (site_id, chat_id, day_date)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    day_date TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    kind TEXT NOT NULL CHECK (kind IN ('correction', 'note')),
+    text TEXT NOT NULL,
+    raised_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'approved', 'denied')),
+    decided_by TEXT,
+    decision_note TEXT,
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_day_site_date ON attendance_days(site_id, day_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_day_chat ON attendance_days(chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_claim_day ON attendance_claims(site_id, chat_id, day_date);
 """
 
 # Postgres-native schema (v3.0): site-scoped tenants, hr role, now() defaults.
@@ -655,6 +697,47 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
 
 CREATE INDEX IF NOT EXISTS idx_payroll_run_period ON payroll_runs(site_id, period);
 CREATE INDEX IF NOT EXISTS idx_payroll_line_run ON payroll_lines(run_id);
+
+CREATE TABLE IF NOT EXISTS attendance_days (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    day_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'confirmed', 'disputed', 'resolved')),
+    origin TEXT NOT NULL DEFAULT 'none'
+        CHECK (origin IN ('self', 'assisted', 'none')),
+    first_in TEXT,
+    last_out TEXT,
+    late_minutes INTEGER,
+    verdict TEXT,
+    resolution_note TEXT,
+    resolved_by TEXT,
+    dispute_note TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    UNIQUE (site_id, chat_id, day_date)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_claims (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    day_date TEXT NOT NULL,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    kind TEXT NOT NULL CHECK (kind IN ('correction', 'note')),
+    text TEXT NOT NULL,
+    raised_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'approved', 'denied')),
+    decided_by TEXT,
+    decision_note TEXT,
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_day_site_date ON attendance_days(site_id, day_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_day_chat ON attendance_days(chat_id, site_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_claim_day ON attendance_claims(site_id, chat_id, day_date);
 """
 
 

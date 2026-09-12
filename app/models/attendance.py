@@ -69,3 +69,72 @@ class AttendanceEvent:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     resolved_at: Optional[str] = None
     id: Optional[int] = None
+
+
+class DayStatus:
+    """Day-level workflow (026). 'absent' is a VERDICT, never a state."""
+
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    DISPUTED = "disputed"
+    RESOLVED = "resolved"
+
+
+class ClaimKind:
+    CORRECTION = "correction"
+    NOTE = "note"
+
+
+class ClaimStatus:
+    OPEN = "open"
+    APPROVED = "approved"
+    DENIED = "denied"
+
+
+@dataclass
+class AttendanceDay:
+    """The aggregate truth container for one employee-day (026).
+
+    Events remain the evidence; this row only tracks workflow + the final
+    human verdict. Nothing here may be auto-filled from GPS absence.
+    """
+
+    chat_id: str
+    day_date: str
+    """YYYY-MM-DD."""
+
+    site_id: Optional[str] = None
+    status: str = DayStatus.PENDING
+    origin: str = "none"
+    """self | assisted | none - provenance label, never a verdict."""
+    first_in: Optional[str] = None
+    last_out: Optional[str] = None
+    late_minutes: Optional[int] = None
+    verdict: Optional[str] = None
+    resolution_note: Optional[str] = None
+    resolved_by: Optional[str] = None
+    dispute_note: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    resolved_at: Optional[str] = None
+    id: Optional[int] = None
+
+
+@dataclass
+class AttendanceClaim:
+    """Correction claim or manager note on one employee-day (026)."""
+
+    chat_id: str
+    day_date: str
+    kind: str
+    """correction (affects the day on approval) | note (observations only)."""
+    text: str
+    raised_by: str
+    """Employee chat_id (correction) or manager chat_id (note)."""
+
+    site_id: Optional[str] = None
+    status: str = ClaimStatus.OPEN
+    decided_by: Optional[str] = None
+    decision_note: Optional[str] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    decided_at: Optional[str] = None
+    id: Optional[int] = None
