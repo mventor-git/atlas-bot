@@ -24,7 +24,7 @@ from app.models.config import AppConfig
 from app.models.database import Report, ReportStatus
 from app.repositories.report_repository import ReportRepository
 from app.services.arabic_date_service import ArabicDateService
-from app.services.holiday_calendar import HolidayCalendarService
+from app.services.working_calendar import WorkingCalendar
 from app.utils.exceptions import DatabaseError
 
 try:
@@ -98,7 +98,9 @@ class NotificationManager:
         self._db = db_manager
         self._config = config
         self._repo = ReportRepository(db_manager)
-        self._holiday_calendar = HolidayCalendarService(config)
+        # Stage 1 (028): single authoritative calendar policy for the
+        # deployment origin site (same times/messages as before).
+        self._calendar = WorkingCalendar(config)
 
         # Tracking state
         self._sent_today: set[str] = set()
@@ -192,13 +194,13 @@ class NotificationManager:
 
         cfg = self._config.notification
 
-        # Check if today is a holiday or Friday
-        is_holiday_today = self._holiday_calendar.is_holiday(today_str)
+        # Check if today is a required workday (028: single policy)
+        required, reason = self._calendar.describe(today_str)
 
-        # On holidays: auto-create no_report at 9 AM (start of day)
+        # On non-working days: auto-create no_report at 9 AM (start of day)
         # and skip all notification reminders.
-        if is_holiday_today:
-            holiday_name = self._holiday_calendar.get_holiday_name(today_str) or "Holiday"
+        if not required:
+            holiday_name = reason or "Holiday"
             if self._is_time_match(current_hour, current_minute,
                                     cfg.morning_reminder_hour, cfg.morning_reminder_minute):
                 has_report = self._has_today_report(today_str)
