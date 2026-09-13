@@ -36,9 +36,12 @@ def setup():
                               site_id=site))
             members.grant(chat_id, site)
         members.grant("u3", "site-b")
-        users.set_salary("u1", 12000.0, set_by="hq1")
-        users.set_salary("u2", 8000.0, set_by="hq1")
-        users.set_salary("u3", 10000.0, set_by="hq1")
+        users.set_salary("u1", 12000.0, set_by="hq1",
+                           effective_from="2026-01-01")
+        users.set_salary("u2", 8000.0, set_by="hq1",
+                         effective_from="2026-01-01")
+        users.set_salary("u3", 10000.0, set_by="hq1",
+                         effective_from="2026-01-01")
         service = PayrollService(PayrollRepository(manager), users,
                                  membership_repo=members)
         yield service, users, members, manager
@@ -224,7 +227,7 @@ class TestSubjectSite:
                 users = UserRepository(manager)
                 users.upsert(User(chat_id="u1", role="normal_user",
                                   site_id="site-a"))
-                users.set_salary("u1", 12000.0)
+                users.set_salary("u1", 12000.0, effective_from="2026-01-01")
                 legacy = PayrollService(PayrollRepository(manager), users)
                 run = legacy.create_run("2026-09", "hq1", site_id="site-a")
                 assert legacy.add_line(run.id, "u1", 12000.0,

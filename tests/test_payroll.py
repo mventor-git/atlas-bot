@@ -21,7 +21,7 @@ def service():
         users = UserRepository(manager)
         users.upsert(User(chat_id="u1", role="normal_user", site_id="site-a"))
         users.upsert(User(chat_id="u2", role="normal_user", site_id="site-a"))
-        users.set_salary("u1", 12000.0)
+        users.set_salary("u1", 12000.0, effective_from="2026-01-01")
         yield PayrollService(PayrollRepository(manager), users)
         manager.close_all()
 

@@ -63,8 +63,8 @@ def service():
         users = UserRepository(manager)
         users.upsert(User(chat_id="111", role="normal_user"))
         users.upsert(User(chat_id="222", role="hr"))
-        users.set_salary("111", 12000.0)
-        users.set_salary("222", 15000.0)
+        users.set_salary("111", 12000.0, effective_from="2026-01-01")
+        users.set_salary("222", 15000.0, effective_from="2026-01-01")
         yield PayrollService(PayrollRepository(manager), users)
         manager.close_all()
 
@@ -115,7 +115,7 @@ class TestOfficer:
         update = make_update(222, "/payroll_add 2026-09 999")
         await payroll_handlers.payroll_add_command(update, ctx)
         update.effective_message.reply_text.assert_called_once()
-        assert "No salary stored" in \
+        assert "No salary effective" in \
             update.effective_message.reply_text.call_args[0][0]
 
 
