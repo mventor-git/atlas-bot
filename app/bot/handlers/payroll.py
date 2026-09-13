@@ -1,6 +1,8 @@
-"""Payroll handlers: runs, salaries, self-service (021; Phase 1 site-scoped)."""
+"""Payroll handlers: runs, salaries, policy, corrections, self-service."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
@@ -203,11 +205,17 @@ async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         status = run.status
         if run.status != PayrollRunStatus.EXPORTED:
             status += " (provisional)"
-        await update.effective_message.reply_text(
-            f"*{run.period}* at `{run.site_id}` - `{status}`\nBase "
-            f"{line.base_pay:g} + OT {line.ot_amount:g} - adv "
-            f"{line.advances:g} - ded {line.deductions:g} = *{line.net:g}*.",
-            parse_mode="Markdown")
+        text = (f"*{run.period}* at `{run.site_id}` - `{status}`\nBase "
+                f"{line.base_pay:g} + OT {line.ot_amount:g} - adv "
+                f"{line.advances:g} - ded {line.deductions:g} = *{line.net:g}*.")
+        adjustments = service.adjustments_for(run.id, chat_id,
+                                              site_id=run.site_id)
+        if adjustments:
+            total = round(sum(a.amount for a in adjustments), 2)
+            text += (f"\nCorrections: {total:+g} -> *{line.net + total:g}* "
+                     f"({len(adjustments)} authorized).")
+        await update.effective_message.reply_text(text,
+                                                  parse_mode="Markdown")
 
 
 async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -256,6 +264,114 @@ async def handle_salary_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"{report['skipped']} skipped.")
 
 
+# --- policy + corrections (5B) ---
+
+async def _policy_officer(update: Update, context, resume: str):
+    """Resolve active site + manage_payroll_policy gate."""
+    chat_id, _ = _me(update)
+    site = site_session.resolve_site(update, context)
+    if site is None:
+        await site_session.ask_site(update, context, resume=resume,
+                                    hint="Repeat your payroll command.")
+        return None
+    if not _auth(context).has_capability(chat_id, "manage_payroll_policy",
+                                         site):
+        await update.effective_message.reply_text(
+            "Payroll policy needs HQ policy rights.")
+        return None
+    return chat_id, site
+
+
+def _render_policy(site: str, period: str, policy) -> str:
+    if policy is None:
+        return (f"No policy at `{site}` for `{period}` - "
+                "system defaults apply (240h / 1.5x / 2dp).")
+    return (f"*Policy v{policy.version}* at `{site}` "
+            f"(effective {policy.effective_from})\n"
+            f"Basis: {policy.hours_basis} {policy.standard_hours:g}h | "
+            f"OT x{policy.ot_multiplier:g} | round {policy.rounding}\n"
+            f"Set by `{policy.set_by}`"
+            + (f" - {policy.reason}" if policy.reason else ""))
+
+
+async def payroll_policy_command(update: Update, context) -> None:
+    """View the active policy: /payroll_policy [YYYY-MM]."""
+    officer = await _officer(update, context, "payroll_policy")
+    if officer is None:
+        return
+    _, site = officer
+    parts = (update.message.text or "").split()
+    period = parts[1] if len(parts) == 2 else datetime.now().strftime("%Y-%m")
+    await update.effective_message.reply_text(
+        _render_policy(site, period,
+                       _payroll(context).active_policy(site, period)),
+        parse_mode="Markdown")
+
+
+async def payroll_policy_set_command(update: Update, context) -> None:
+    """Set a policy version: /payroll_policy_set <YYYY-MM-DD> <hours> <ot_mult> [reason]."""
+    officer = await _policy_officer(update, context, "payroll_policy_set")
+    if officer is None:
+        return
+    by, site = officer
+    parts = (update.message.text or "").split(None, 4)
+    if len(parts) < 4:
+        await update.effective_message.reply_text(
+            "Usage: /payroll_policy_set <YYYY-MM-DD> <hours> <ot_mult> [reason]")
+        return
+    try:
+        hours, mult = float(parts[2]), float(parts[3])
+    except ValueError:
+        await update.effective_message.reply_text("Hours and multiplier must be numbers.")
+        return
+    try:
+        policy = _payroll(context).set_policy(
+            site, by, standard_hours=hours, ot_multiplier=mult,
+            effective_from=parts[1],
+            reason=parts[4] if len(parts) > 4 else None)
+    except DatabaseError as e:
+        await update.effective_message.reply_text(f"Could not set: {e}")
+        return
+    await update.effective_message.reply_text(
+        f"Policy v{policy.version} recorded for `{site}` "
+        f"(effective {policy.effective_from}).",
+        parse_mode="Markdown")
+
+
+async def payroll_adjust_command(update: Update, context) -> None:
+    """Correct an exported run: /payroll_adjust <YYYY-MM> <chat_id> <amount> <reason>."""
+    officer = await _officer(update, context, "payroll_adjust")
+    if officer is None:
+        return
+    by, site = officer
+    parts = (update.message.text or "").split(None, 4)
+    if len(parts) < 5:
+        await update.effective_message.reply_text(
+            "Usage: /payroll_adjust <YYYY-MM> <chat_id> <amount> <reason>")
+        return
+    try:
+        amount = float(parts[3])
+    except ValueError:
+        await update.effective_message.reply_text("Amount must be a number.")
+        return
+    service = _payroll(context)
+    run = service.get_run(parts[1], site_id=site)
+    if run is None:
+        await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
+                                                  parse_mode="Markdown")
+        return
+    try:
+        service.add_adjustment(run.id, parts[2], amount, parts[4], by,
+                               site_id=site)
+    except DatabaseError as e:
+        await update.effective_message.reply_text(f"Could not adjust: {e}")
+        return
+    await update.effective_message.reply_text(
+        f"Correction {amount:+g} recorded for `{parts[2]}` "
+        f"(adjusted net *{service.adjusted_net(run.id, parts[2], site_id=site):g}*).",
+        parse_mode="Markdown")
+
+
 def get_registration_handlers() -> list:
     return [
         CommandHandler("payroll_build", payroll_build_command),
@@ -265,4 +381,7 @@ def get_registration_handlers() -> list:
         CommandHandler("mypay", mypay_command),
         CommandHandler("salary", salary_command),
         CommandHandler("salary_import", salary_import_command),
+        CommandHandler("payroll_policy", payroll_policy_command),
+        CommandHandler("payroll_policy_set", payroll_policy_set_command),
+        CommandHandler("payroll_adjust", payroll_adjust_command),
     ]

@@ -333,6 +333,8 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
     created_by TEXT,
     created_at TEXT NOT NULL,
     exported_at TEXT,
+    policy_version INTEGER,
+    policy_snapshot TEXT,
     UNIQUE (site_id, period)
 );
 
@@ -347,6 +349,12 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
     deductions REAL NOT NULL DEFAULT 0,
     net REAL NOT NULL,
     salary_history_id INTEGER REFERENCES salary_history(id),
+    ot_source TEXT NOT NULL DEFAULT 'manual',
+    ot_refs TEXT,
+    advances_source TEXT NOT NULL DEFAULT 'manual',
+    advances_refs TEXT,
+    deductions_source TEXT NOT NULL DEFAULT 'manual',
+    deductions_refs TEXT,
     UNIQUE (run_id, chat_id)
 );
 
@@ -366,6 +374,37 @@ CREATE TABLE IF NOT EXISTS salary_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_salary_history_user ON salary_history(chat_id, effective_from);
+
+-- Payroll calculation policy (5B): versioned, effective-dated, per site.
+CREATE TABLE IF NOT EXISTS payroll_policies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    version INTEGER NOT NULL,
+    effective_from TEXT NOT NULL,
+    hours_basis TEXT NOT NULL DEFAULT 'fixed',
+    standard_hours REAL NOT NULL DEFAULT 240.0,
+    ot_multiplier REAL NOT NULL DEFAULT 1.5,
+    rounding TEXT NOT NULL DEFAULT 'standard_2dp',
+    set_by TEXT,
+    set_at TEXT NOT NULL,
+    reason TEXT,
+    UNIQUE (site_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_policy_site ON payroll_policies(site_id, effective_from);
+
+-- Audited corrections on exported runs (5B; locked rows never UPDATE).
+CREATE TABLE IF NOT EXISTS payroll_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES payroll_runs(id),
+    chat_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    reason TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_adjustment_run ON payroll_adjustments(run_id, chat_id);
 
 -- Attendance days (026 day model; events stay the evidence layer)
 CREATE TABLE IF NOT EXISTS attendance_days (
@@ -730,6 +769,8 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
     created_by TEXT,
     created_at TEXT NOT NULL,
     exported_at TEXT,
+    policy_version INTEGER,
+    policy_snapshot TEXT,
     UNIQUE (site_id, period)
 );
 
@@ -744,6 +785,12 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
     deductions REAL NOT NULL DEFAULT 0,
     net REAL NOT NULL,
     salary_history_id INTEGER REFERENCES salary_history(id),
+    ot_source TEXT NOT NULL DEFAULT 'manual',
+    ot_refs TEXT,
+    advances_source TEXT NOT NULL DEFAULT 'manual',
+    advances_refs TEXT,
+    deductions_source TEXT NOT NULL DEFAULT 'manual',
+    deductions_refs TEXT,
     UNIQUE (run_id, chat_id)
 );
 
@@ -761,6 +808,35 @@ CREATE TABLE IF NOT EXISTS salary_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_salary_history_user ON salary_history(chat_id, effective_from);
+
+CREATE TABLE IF NOT EXISTS payroll_policies (
+    id SERIAL PRIMARY KEY,
+    site_id TEXT NOT NULL DEFAULT 'default',
+    version INTEGER NOT NULL,
+    effective_from TEXT NOT NULL,
+    hours_basis TEXT NOT NULL DEFAULT 'fixed',
+    standard_hours REAL NOT NULL DEFAULT 240.0,
+    ot_multiplier REAL NOT NULL DEFAULT 1.5,
+    rounding TEXT NOT NULL DEFAULT 'standard_2dp',
+    set_by TEXT,
+    set_at TEXT NOT NULL,
+    reason TEXT,
+    UNIQUE (site_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_policy_site ON payroll_policies(site_id, effective_from);
+
+CREATE TABLE IF NOT EXISTS payroll_adjustments (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES payroll_runs(id),
+    chat_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    reason TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_adjustment_run ON payroll_adjustments(run_id, chat_id);
 
 CREATE TABLE IF NOT EXISTS attendance_days (
     id SERIAL PRIMARY KEY,
@@ -892,6 +968,8 @@ class DatabaseManager:
         self._ensure_users_salary()
         # 5A payroll safety: line uniqueness + history provenance (idempotent).
         self._ensure_payroll_safety()
+        # 5B payroll policy snapshot + input provenance columns (idempotent).
+        self._ensure_payroll_policy()
         # Craftsman/helper split on pre-existing report_items (idempotent).
         self._ensure_report_items_split()
         # One-report-per-day-PER-SITE uniqueness on pre-existing DBs.
@@ -1053,6 +1131,37 @@ class DatabaseManager:
                          "migration", now, "legacy salary baseline"),
                     )
             self.commit()
+
+    def _ensure_payroll_policy(self) -> None:
+        """5B columns on pre-existing payroll tables (idempotent, both backends).
+
+        Fresh DDL already carries these; CREATE TABLE IF NOT EXISTS never
+        alters. Tables payroll_policies/payroll_adjustments arrive via
+        _init_schema on old DBs automatically.
+        """
+        for column, ddl in (
+            ("policy_version", "INTEGER"),
+            ("policy_snapshot", "TEXT"),
+        ):
+            if (self.table_exists("payroll_runs")
+                    and not self.column_exists("payroll_runs", column)):
+                self.execute(
+                    f"ALTER TABLE payroll_runs ADD COLUMN {column} {ddl}")
+                self.commit()
+        for column, ddl in (
+            ("ot_source", "TEXT NOT NULL DEFAULT 'manual'"),
+            ("ot_refs", "TEXT"),
+            ("advances_source", "TEXT NOT NULL DEFAULT 'manual'"),
+            ("advances_refs", "TEXT"),
+            ("deductions_source", "TEXT NOT NULL DEFAULT 'manual'"),
+            ("deductions_refs", "TEXT"),
+        ):
+            if (self.table_exists("payroll_lines")
+                    and not self.column_exists("payroll_lines", column)):
+                self.execute(
+                    f"ALTER TABLE payroll_lines ADD COLUMN {column} {ddl}")
+                self.commit()
+        logger.info("Payroll policy columns ensured.")
 
     def _ensure_report_items_split(self) -> None:
         """Add report_items.craftsmen/helpers on old DBs (idempotent)."""

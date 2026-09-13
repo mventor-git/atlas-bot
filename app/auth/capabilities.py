@@ -46,6 +46,7 @@ CAPABILITIES: dict[str, tuple[str, str]] = {
     "resolve_suggestion": ("HQ", "Resolve suggestions"),
     "review_resignation": ("HQ", "Process resignations"),
     "manage_payroll": ("HQ", "Manage payroll"),
+    "manage_payroll_policy": ("HQ", "Set payroll calculation policy"),
     "confirm_payout": ("SITE", "Confirm money payout"),
     "confirm_payroll_deduction": ("SITE", "Confirm payroll deduction"),
     # system
@@ -95,6 +96,7 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
         "review_complaint", "resolve_complaint",
         "review_suggestion", "resolve_suggestion",
         "review_resignation", "manage_payroll",
+        "manage_payroll_policy",
         "confirm_payout", "confirm_payroll_deduction",
         "submit_hr_request", "decide_hr_request",
     }),

@@ -74,6 +74,24 @@ class MoneyRepository:
     def deducted_total(self, request_id: int, site_id: str | None = None) -> float:
         return sum(e.amount for e in self.deductions_for(request_id, site_id))
 
+    def deductions_for_subject(self, chat_id: str, period: str,
+                               site_id: str | None = None
+                               ) -> list[DeductionEvent]:
+        """Recorded deduction events for one employee in one YYYY-MM period.
+
+        Joins the parent advance request for subject attribution; only
+        confirmed (recorded) events are consumable by payroll (5B).
+        """
+        rows = self._db.execute(
+            """SELECT de.* FROM deduction_events de
+               JOIN hr_requests hr ON hr.id = de.request_id
+               WHERE de.period = ? AND de.site_id = ?
+                 AND hr.requester_chat_id = ?
+               ORDER BY de.id ASC""",
+            (period, site_id or driver.site_id(), str(chat_id)),
+        ).fetchall()
+        return [self._row_to_model_deduction(r) for r in rows]
+
     @staticmethod
     def _row_to_payout(row) -> PayoutEvent:
         return PayoutEvent(
