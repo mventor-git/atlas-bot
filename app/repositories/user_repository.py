@@ -252,6 +252,28 @@ class UserRepository:
         ).fetchone()
         return dict(row) if row else None
 
+    def salary_for_period(self, chat_id: str, period: str) -> dict | None:
+        """Salary row applicable to a YYYY-MM payroll period (5C rule B).
+
+        Latest row whose effective date (date part) falls on/before the
+        first day of the period. A raise inside the period therefore
+        applies from the NEXT period; retroactive rows affect only runs
+        built after they are recorded — locked runs never change.
+        Returns None when no row covers the period (salary gap).
+        """
+        first_day = f"{period}-01"
+        rows = self._db.execute(
+            "SELECT * FROM salary_history WHERE chat_id = ? "
+            "ORDER BY id ASC",
+            (chat_id,),
+        ).fetchall()
+        best = None
+        for row in rows:
+            effective = str(row["effective_from"] or "")[:10]
+            if effective and effective <= first_day:
+                best = dict(row)
+        return best
+
     def delete(self, chat_id: str) -> bool:
         """Delete a user by chat ID.
 

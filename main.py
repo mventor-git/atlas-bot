@@ -325,7 +325,8 @@ def main() -> None:
                                          user_repo,
                                          membership_repo=membership_repo,
                                          hr_repo=hr_repo,
-                                         money_repo=money_repo)
+                                         money_repo=money_repo,
+                                         day_repo=day_repo)
         notification_outbox = NotificationOutbox(
             NotificationRepository(db_manager),
             max_attempts=config.notification.notify_max_attempts,

@@ -43,8 +43,10 @@ def stack():
         users.upsert(User(chat_id="u2", role="normal_user", site_id="site-a"))
         members.grant("u1", "site-a")
         members.grant("u2", "site-a")
-        users.set_salary("u1", 12000.0, set_by="hq1")
-        users.set_salary("u2", 8000.0, set_by="hq1")
+        users.set_salary("u1", 12000.0, set_by="hq1",
+                           effective_from="2026-01-01")
+        users.set_salary("u2", 8000.0, set_by="hq1",
+                         effective_from="2026-01-01")
         service = PayrollService(PayrollRepository(manager), users,
                                  membership_repo=members,
                                  hr_repo=hr_repo, money_repo=money_repo)

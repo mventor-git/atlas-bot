@@ -116,6 +116,20 @@ def _payroll_ready(**kw):
         "was exported and locked.")
 
 
+def _payroll_exception(**kw):
+    return (
+        "\u26a0\ufe0f *Payroll exception - review required*\n\n"
+        f"Period `{_esc(kw.get('period'))}` at `{_esc(kw.get('site'))}`: "
+        f"{_esc(kw.get('note'))}")
+
+
+def _payroll_corrected(**kw):
+    return (
+        "\U0001f4b0 *Payroll correction recorded*\n\n"
+        f"Period `{_esc(kw.get('period'))}` at `{_esc(kw.get('site'))}`: "
+        f"{_esc(kw.get('note'))}")
+
+
 def _morning(**kw):
     return (
         "\U0001f305 *Good Morning!*\n\n"
@@ -165,6 +179,8 @@ _BUILDERS = {
     "case_update": _case_update,
     "discipline_decision": _discipline_decision,
     "payroll_ready": _payroll_ready,
+    "payroll_exception": _payroll_exception,
+    "payroll_corrected": _payroll_corrected,
 }
 
 TYPES = tuple(sorted(_BUILDERS))

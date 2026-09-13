@@ -25,6 +25,8 @@ from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
+    from app.repositories.attendance_day_repository import (
+        AttendanceDayRepository)
     from app.repositories.membership_repository import MembershipRepository
 
 logger = get_logger(__name__)
@@ -40,12 +42,14 @@ class PayrollService:
                  user_repo: UserRepository,
                  membership_repo: MembershipRepository | None = None,
                  hr_repo: HRRepository | None = None,
-                 money_repo: MoneyRepository | None = None) -> None:
+                 money_repo: MoneyRepository | None = None,
+                 day_repo: AttendanceDayRepository | None = None) -> None:
         self._repo = payroll_repo
         self._users = user_repo
         self._memberships = membership_repo
         self._hr = hr_repo
         self._money = money_repo
+        self._days = day_repo
 
     # --- math (pure) ---
 
@@ -230,11 +234,12 @@ class PayrollService:
             if source == "approved" and not refs:
                 raise DatabaseError(
                     f"'approved' {name} input must cite record refs.")
-        history = self._users.current_salary_record(str(chat_id))
+        history = self._users.salary_for_period(str(chat_id), run.period)
         if history is None:
             raise DatabaseError(
-                f"No salary history for {chat_id}; set the salary first "
-                "so the line can cite its provenance.")
+                f"No salary effective for {chat_id} in {run.period}; "
+                "record a salary with an effective date on/before the "
+                "period so the line can cite its provenance.")
         snapshot = json.loads(run.policy_snapshot or "{}")
         ot_amount, net = self.compute_net(
             base_pay, ot_hours, run.standard_hours,
@@ -273,20 +278,22 @@ class PayrollService:
                   entries: list[dict], site_id: str | None = None,
                   ot_multiplier: float = 1.5,
                   standard_hours: float = 240.0) -> PayrollRun:
-        """Create a run with bases pulled from the salary store.
+        """Create a run with bases pulled from period-effective salaries.
 
         Each entry: {chat_id, ot_hours?, advances?, deductions?}.
-        Missing salary blocks that line explicitly (never silent zero).
+        A subject with no salary effective for the period blocks that
+        line explicitly (never silent zero, never today's cache value).
         """
         run = self.create_run(period, created_by, site_id,
                               ot_multiplier, standard_hours)
         for entry in entries:
             chat_id = str(entry["chat_id"])
-            user = self._users.get_by_chat_id(chat_id)
-            if user is None or user.monthly_salary is None:
+            salary = self._users.salary_for_period(chat_id, period)
+            if salary is None:
                 raise DatabaseError(
-                    f"No salary stored for {chat_id}; set it before payroll.")
-            self.add_line(run.id, chat_id, user.monthly_salary,
+                    f"No salary effective for {chat_id} in {period}; "
+                    "record one before payroll.")
+            self.add_line(run.id, chat_id, salary["amount"],
                           entry.get("ot_hours", 0.0),
                           entry.get("advances", 0.0),
                           entry.get("deductions", 0.0),
@@ -350,6 +357,38 @@ class PayrollService:
         return {"total": round(sum(e.amount for e in events), 2),
                 "event_ids": [e.id for e in events]}
 
+    def salary_for_period(self, chat_id: str, period: str) -> dict | None:
+        """Salary row applicable to a period (5C rule B passthrough)."""
+        return self._users.salary_for_period(str(chat_id), period)
+
+    def list_runs(self, site_id: str | None = None) -> list[PayrollRun]:
+        """Runs of one site, newest period first (HQ inspection)."""
+        return self._repo.get_all(site_id=site_id)
+
+    def attendance_summary_for(self, chat_id: str, site_id: str,
+                               period: str) -> dict:
+        """Read-only finalized-attendance signal (5C; zero payroll effect).
+
+        Counts RESOLVED attendance days in the period by verdict.
+        Pending/confirmed/disputed days are reported separately and must
+        never drive payroll. No monetary mapping exists (business OPEN);
+        manual confirmation remains authoritative.
+        """
+        if self._days is None:
+            raise DatabaseError("Attendance repository is not wired.")
+        resolved: dict[str, int] = {}
+        open_count = 0
+        for day in self._days.days_for_chat(str(chat_id), site_id=site_id):
+            if not str(day.day_date or "").startswith(period):
+                continue
+            if day.status == "resolved":
+                verdict = day.verdict or "unverdict"
+                resolved[verdict] = resolved.get(verdict, 0) + 1
+            else:
+                open_count += 1
+        return {"resolved_by_verdict": resolved,
+                "open_days": open_count}
+
     # --- explanation (5B foundation for "why is my net X?") ---
 
     def explain_line(self, run_id: int, line_id: int,
@@ -388,6 +427,9 @@ class PayrollService:
             "policy_origin": snapshot.get("origin", "unknown"),
             "policy_version": run.policy_version,
             "net": line.net,
+            "negative_net_review": line.net < 0,
+            "attendance": self._safe_attendance(line.chat_id, run.site_id,
+                                                run.period),
             "adjustments": [
                 {"amount": a.amount, "reason": a.reason,
                  "created_by": a.created_by, "created_at": a.created_at}
@@ -397,6 +439,13 @@ class PayrollService:
         }
 
     # --- corrections (5B: adjustments on exported runs, never UPDATE) ---
+
+    def _safe_attendance(self, chat_id: str, site_id: str,
+                         period: str) -> dict:
+        """Attendance signal for explain; unwired repo reads as unknown."""
+        if self._days is None:
+            return {"resolved_by_verdict": {}, "open_days": "unknown"}
+        return self.attendance_summary_for(chat_id, site_id, period)
 
     def add_adjustment(self, run_id: int, chat_id: str, amount: float,
                        reason: str, created_by: str,

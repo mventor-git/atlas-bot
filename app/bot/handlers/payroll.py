@@ -31,6 +31,33 @@ def _payroll(context: ContextTypes.DEFAULT_TYPE):
     return context.bot_data["payroll_service"]
 
 
+def _audit(context, actor: str, action: str, object_type: str,
+           object_id=None, object_date: str = "",
+           old_value: str = "", new_value: str = "") -> None:
+    """Best-effort domain audit via EventLogService (never breaks ops)."""
+    try:
+        svc = context.bot_data.get("event_log_service")
+        if svc is None:
+            return
+        svc.log(actor, action, object_type=object_type, object_id=object_id,
+                object_date=object_date, old_value=old_value,
+                new_value=new_value)
+    except Exception as e:  # audit must not break payroll operations
+        logger.warning("Payroll audit log failed: %s", e)
+
+
+async def _notify_holders(context, ntype: str, site: str, period: str,
+                          note: str = "") -> None:
+    """Durable outbox fan-out to site payroll holders (Stage 4)."""
+    from app.bot.notify import notify
+
+    auth = _auth(context)
+    for holder in auth.chat_ids_for_site(site, "manage_payroll"):
+        await notify(context, ntype, holder, site,
+                     reference=f"payroll:{period}", date=period,
+                     period=period, site=site, note=note)
+
+
 async def _officer(update: Update, context, resume: str) -> tuple[str, str] | None:
     """Resolve active site + manage_payroll gate; None = handled (asked/denied)."""
     chat_id, _ = _me(update)
@@ -50,11 +77,16 @@ def _render_run(run, lines) -> str:
     head = [f"*Payroll {run.period}* - `{run.status}` - site `{run.site_id}`",
             f"Lines: {len(lines)} | Total: {total:g}"]
     for line in lines[:20]:
+        flag = " \u26a0\ufe0fREVIEW" if line.net < 0 else ""
         head.append(f"`{line.chat_id}`: base {line.base_pay:g} + OT "
                     f"{line.ot_amount:g} - adv {line.advances:g} - ded "
-                    f"{line.deductions:g} = *{line.net:g}*")
+                    f"{line.deductions:g} = *{line.net:g}*{flag}")
     if len(lines) > 20:
         head.append(f"... and {len(lines) - 20} more")
+    negatives = sum(1 for line in lines if line.net < 0)
+    if negatives:
+        head.append(f"\u26a0\ufe0f {negatives} negative net(s) require review "
+                    "(no floor applied; policy OPEN).")
     return "\n".join(head)
 
 
@@ -75,6 +107,8 @@ async def payroll_build_command(update: Update, context: ContextTypes.DEFAULT_TY
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not build: {e}")
         return
+    _audit(context, by, "payroll.run_created", "payroll_run",
+           object_id=run.id, object_date=run.period)
     await update.effective_message.reply_text(
         f"Draft payroll `{run.period}` opened at `{site}` (#{run.id}). "
         "Add lines with /payroll_add.", parse_mode="Markdown")
@@ -104,19 +138,28 @@ async def payroll_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text(f"No run for `{parts[1]}`.",
                                                   parse_mode="Markdown")
         return
-    salary = service.user_salary(parts[2])
+    salary = service.salary_for_period(parts[2], run.period)
     if salary is None:
         await update.effective_message.reply_text(
-            f"No salary stored for `{parts[2]}` - set it with /salary first.",
-            parse_mode="Markdown")
+            f"No salary effective for `{parts[2]}` in `{run.period}` - "
+            "set it with /salary first.", parse_mode="Markdown")
         return
     try:
-        line = service.add_line(run.id, parts[2], salary, *numbers, site_id=site)
+        line = service.add_line(run.id, parts[2], salary["amount"], *numbers,
+                                site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not add: {e}")
         return
-    await update.effective_message.reply_text(
-        f"Line for `{parts[2]}`: net *{line.net:g}*.", parse_mode="Markdown")
+    _audit(context, officer[0], "payroll.line_added", "payroll_line",
+           object_id=line.id, object_date=run.period,
+           new_value=f"{parts[2]} net={line.net:g} base={line.base_pay:g}")
+    text = f"Line for `{parts[2]}`: net *{line.net:g}*."
+    if line.net < 0:
+        text += ("\n\u26a0\ufe0f Payroll exception: negative net requires "
+                 "review (no floor applied).")
+        await _notify_holders(context, "payroll_exception", site, run.period,
+                              f"negative net for `{parts[2]}`: {line.net:g}")
+    await update.effective_message.reply_text(text, parse_mode="Markdown")
 
 
 async def payroll_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -140,7 +183,7 @@ async def payroll_view_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lock a run at export: /payroll_export <YYYY-MM> (021b emits the PDF)."""
+    """Lock a run at export (lock + notify; document artifact deferred P5-2)."""
     officer = await _officer(update, context, "payroll_export")
     if officer is None:
         return
@@ -160,10 +203,15 @@ async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_T
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not export: {e}")
         return
+    lines = service.lines(run)
+    negatives = sum(1 for line in lines if line.net < 0)
     await update.effective_message.reply_text(
         f"Payroll `{run.period}` exported and locked "
-        f"({len(service.lines(run))} lines). PDF in 021b.",
+        f"({len(lines)} lines). Document artifact deferred (P5-2).",
         parse_mode="Markdown")
+    _audit(context, chat_id, "payroll.run_exported", "payroll_run",
+           object_id=run.id, object_date=run.period,
+           new_value=f"{len(lines)} lines locked")
     from app.bot.notify import notify
 
     auth = _auth(context)
@@ -172,15 +220,20 @@ async def payroll_export_command(update: Update, context: ContextTypes.DEFAULT_T
             await notify(context, "payroll_ready", holder, site,
                          reference=f"payroll:{run.period}",
                          date=run.period, period=run.period)
+    if negatives:
+        await _notify_holders(context, "payroll_exception", site, run.period,
+                              f"{negatives} negative net(s) locked; review.")
 
 
 # --- self-service ---
 
 async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show my line(s): /mypay <YYYY-MM> (own data across member sites)."""
+    """Show my line(s): /mypay <YYYY-MM> (SELF-scoped, capability-gated)."""
     chat_id, _ = _me(update)
     auth = _auth(context)
-    if not auth.sites_for_user(chat_id):
+    sites = [site for site in auth.sites_for_user(chat_id)
+             if auth.has_capability(chat_id, "view_own_payroll", site)]
+    if not sites:
         await update.effective_message.reply_text("Payroll view needs an approved account.")
         return
     parts = (update.message.text or "").split()
@@ -189,7 +242,7 @@ async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     service = _payroll(context)
     mine, statuses = [], []
-    for site in auth.sites_for_user(chat_id):   # SELF: only sites they belong to
+    for site in sites:   # SELF: own lines at capable sites only
         run = service.get_run(parts[1], site_id=site)
         if run is None:
             continue
@@ -216,6 +269,13 @@ async def mypay_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                      f"({len(adjustments)} authorized).")
         await update.effective_message.reply_text(text,
                                                   parse_mode="Markdown")
+    if len(mine) > 1:
+        combined = round(sum(
+            service.adjusted_net(run.id, chat_id, site_id=run.site_id)
+            for run, _ in mine), 2)
+        await update.effective_message.reply_text(
+            f"Combined across {len(mine)} sites: *{combined:g}*.",
+            parse_mode="Markdown")
 
 
 async def salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -336,6 +396,10 @@ async def payroll_policy_set_command(update: Update, context) -> None:
         f"Policy v{policy.version} recorded for `{site}` "
         f"(effective {policy.effective_from}).",
         parse_mode="Markdown")
+    _audit(context, by, "payroll.policy_set", "payroll_policy",
+           object_id=policy.id, object_date=policy.effective_from,
+           new_value=f"v{policy.version} {policy.standard_hours:g}h "
+                     f"x{policy.ot_multiplier:g} {policy.rounding}")
 
 
 async def payroll_adjust_command(update: Update, context) -> None:
@@ -361,14 +425,43 @@ async def payroll_adjust_command(update: Update, context) -> None:
                                                   parse_mode="Markdown")
         return
     try:
-        service.add_adjustment(run.id, parts[2], amount, parts[4], by,
-                               site_id=site)
+        adj = service.add_adjustment(run.id, parts[2], amount, parts[4], by,
+                                     site_id=site)
     except DatabaseError as e:
         await update.effective_message.reply_text(f"Could not adjust: {e}")
         return
     await update.effective_message.reply_text(
         f"Correction {amount:+g} recorded for `{parts[2]}` "
         f"(adjusted net *{service.adjusted_net(run.id, parts[2], site_id=site):g}*).",
+        parse_mode="Markdown")
+    _audit(context, by, "payroll.adjustment", "payroll_adjustment",
+           object_id=adj.id, object_date=run.period,
+           new_value=f"{parts[2]} {amount:+g} ({parts[4]})")
+    await _notify_holders(context, "payroll_corrected", site, run.period,
+                          f"{amount:+g} for `{parts[2]}`: {parts[4]}")
+
+
+async def payroll_runs_command(update: Update, context) -> None:
+    """List site runs: /payroll_runs (HQ inspection)."""
+    officer = await _officer(update, context, "payroll_runs")
+    if officer is None:
+        return
+    _, site = officer
+    service = _payroll(context)
+    runs = service.list_runs(site_id=site)
+    if not runs:
+        await update.effective_message.reply_text(f"No payroll runs at `{site}`.",
+                                                  parse_mode="Markdown")
+        return
+    rows = []
+    for run in runs:
+        lines = service.lines(run)
+        negs = sum(1 for line in lines if line.net < 0)
+        flag = " \u26a0\ufe0fREVIEW" if negs else ""
+        rows.append(f"`{run.period}` {run.status} "
+                    f"({len(lines)} lines{flag})")
+    await update.effective_message.reply_text(
+        f"*Payroll runs at `{site}`*\n" + "\n".join(rows),
         parse_mode="Markdown")
 
 
@@ -384,4 +477,5 @@ def get_registration_handlers() -> list:
         CommandHandler("payroll_policy", payroll_policy_command),
         CommandHandler("payroll_policy_set", payroll_policy_set_command),
         CommandHandler("payroll_adjust", payroll_adjust_command),
+        CommandHandler("payroll_runs", payroll_runs_command),
     ]
