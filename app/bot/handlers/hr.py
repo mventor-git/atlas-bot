@@ -282,11 +282,15 @@ async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_reject_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     note = (update.message.text or "").strip()
     req_id = context.user_data.get("hr_reject_id")
+    site = context.user_data.get("hr_reject_site")
     chat_id, name = _me(update)
+    if not _auth(context).has_capability(chat_id, "decide_hr_request", site):
+        await update.message.reply_text("Rejection needs an HR account.")
+        return
     service = _hr(context)
     try:
         req = service.decide_hr(req_id, chat_id, name, False, note=note,
-                                site_id=context.user_data.get("hr_reject_site"))
+                                site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not reject: {e}")
         return
@@ -311,6 +315,9 @@ async def handle_delegate_target(update: Update, context: ContextTypes.DEFAULT_T
     req = service.get(req_id, site_id=site)
     if req is None:
         await update.message.reply_text("Request not found.")
+        return
+    if not auth.has_capability(chat_id, "delegate_hr_request", req.site_id):
+        await update.message.reply_text("Delegation needs a PM account.")
         return
     # Target must be able to decide HR requests AT THE REQUEST'S SITE
     # (memberships are the authority; "hr" is only a label).
@@ -343,11 +350,15 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Send the deduction month as YYYY-MM.")
         return
     req_id = context.user_data.get("hr_approve_id")
+    site = context.user_data.get("hr_approve_site")
     chat_id, name = _me(update)
+    if not _auth(context).has_capability(chat_id, "decide_hr_request", site):
+        await update.message.reply_text("Approval needs an HR account.")
+        return
     service = _hr(context)
     try:
         req = service.decide_hr(req_id, chat_id, name, True, deduction_month=month,
-                                site_id=context.user_data.get("hr_approve_site"))
+                                site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not approve: {e}")
         return

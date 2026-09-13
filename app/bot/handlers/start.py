@@ -815,6 +815,16 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                 )
                 return
 
+            from app.services import report_visibility as visibility
+
+            if auth is not None and visibility.resolve(
+                    auth, telegram_user, report.site_id) == visibility.OWNER:
+                await query.edit_message_text(
+                    visibility.render_simple(report),
+                    parse_mode="Markdown",
+                )
+                return
+
             items_text = ""
             total_workers = 0
             for i, item in enumerate(report.items, 1):

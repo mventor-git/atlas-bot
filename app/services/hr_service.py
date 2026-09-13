@@ -165,6 +165,9 @@ class HRService:
         if req.status != HRRequestStatus.PENDING:
             raise DatabaseError(
                 f"Request {request_id} is {req.status}, PM confirm needs pending.")
+        if str(pm_chat_id) == str(req.requester_chat_id):
+            raise DatabaseError(
+                "Requester cannot confirm their own request.")
         req.status = HRRequestStatus.PM_CONFIRMED
         req.assigned_to = None  # back to the HR queue
         _sign(req, "project_manager", pm_chat_id, pm_name, "confirmed")
@@ -200,6 +203,9 @@ class HRService:
         if req.status != HRRequestStatus.PM_CONFIRMED:
             raise DatabaseError(
                 f"Request {request_id} is {req.status}, HR decision needs PM confirmation.")
+        if str(hr_chat_id) == str(req.requester_chat_id):
+            raise DatabaseError(
+                "Requester cannot decide their own request.")
         if approve:
             if req.request_type == HRRequestType.ADVANCE:
                 if not _MONTH_RE.match(deduction_month or ""):
