@@ -316,6 +316,8 @@ async def handle_salary_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not text:
         await update.message.reply_text("Send CSV lines (or /cancel).")
         return
+    if await _officer(update, context, "salary_import") is None:
+        return
     by, _ = _me(update)
     report = _payroll(context).import_salaries(text, set_by=by)
     context.user_data.pop("state", None)

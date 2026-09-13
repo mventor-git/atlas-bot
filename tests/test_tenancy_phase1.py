@@ -273,7 +273,7 @@ class TestHandlerIsolation:
         monkeypatch.setattr(driver, "site_id", lambda: "a")
         stack.make_user("18", role="hr", site="b")   # hr elsewhere, NOT at a
         stack.members.grant("18", "b", [])
-        stack.members.grant("21", "a", [])
+        stack.members.grant("21", "a", ["delegate_hr_request"])
         stack.users.upsert(User(chat_id="21", role="admin", site_id="a"))
         req = stack.hr.request_advance("21", "boss", 500.0, "medical",
                                        site_id="a")

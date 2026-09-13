@@ -220,10 +220,15 @@ async def handle_disc_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     outcome, note = (part.strip() for part in text.split("|", 1))
     chat_id, _ = _me(update)
+    site = context.user_data.get("disc_decide_site")
+    if not _auth(context).has_capability(chat_id, "approve_disciplinary_action",
+                                         site):
+        await update.message.reply_text("Decisions need HQ approval rights.")
+        return
     try:
         case = _discipline(context).decide(
             context.user_data.get("disc_decide_id"), chat_id, outcome, note,
-            site_id=context.user_data.get("disc_decide_site"))
+            site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not decide: {e}")
         return

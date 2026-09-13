@@ -230,6 +230,10 @@ async def _route_to_confirmer(update, context, event) -> None:
     target = next(
         (c for c in candidates if c and str(c) != str(event.chat_id)), None)
     if target is None:
+        if getattr(event, "method", "") == "assisted":
+            logger.info("Assisted attendance %s stays pending (human confirm required).",
+                        event.id)
+            return
         service = _attendance(context)
         try:
             event = service.confirm(event.id, "system", site_id=event.site_id)
