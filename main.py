@@ -290,7 +290,9 @@ def main() -> None:
         audit_service = AuditService(db_manager)
         add_contractor_service = AddContractorService(contractor_repo, audit_service)  # mventor-ticket-036
         daily_comparison_service = DailyComparisonService(report_repo_with_events)  # mventor-ticket-019
-        hr_service = HRService(HRRepository(db_manager), MoneyRepository(db_manager))  # HR advances + transport
+        hr_repo = HRRepository(db_manager)
+        money_repo = MoneyRepository(db_manager)
+        hr_service = HRService(hr_repo, money_repo)  # HR advances + transport
         attendance_service = AttendanceService(AttendanceRepository(db_manager))
         day_repo = AttendanceDayRepository(db_manager)
         attendance_day_service = AttendanceDayService(
@@ -321,7 +323,9 @@ def main() -> None:
             logger.info("Migrated %d legacy site memberships.", migrated)
         payroll_service = PayrollService(PayrollRepository(db_manager),
                                          user_repo,
-                                         membership_repo=membership_repo)
+                                         membership_repo=membership_repo,
+                                         hr_repo=hr_repo,
+                                         money_repo=money_repo)
         notification_outbox = NotificationOutbox(
             NotificationRepository(db_manager),
             max_attempts=config.notification.notify_max_attempts,
