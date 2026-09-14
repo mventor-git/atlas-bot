@@ -50,6 +50,9 @@ database/*.ods
 !database/.gitkeep
 !database/tables.ods
 
+# Backups (G9 - never commit real data copies)
+backups/
+
 # Logs
 logs/*.log
 !logs/.gitkeep
