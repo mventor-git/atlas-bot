@@ -34,13 +34,18 @@ from odf.text import P                                  # noqa: E402
 
 from app.libre import ots                               # noqa: E402
 
-NAVY = "#1b3a5f"
-GOLD = "#c5a04a"
-LIGHT = "#eaf0f7"
-GRAY = "#6b7280"
-LINE = "#9aa5b1"
-WHITE = "#ffffff"
-TINT = "#f5f8fc"
+# Anthropic editorial palette (claude.ai / anthropic.com, light mode):
+# warm near-black ink, parchment hairlines, one coral accent, NO dark fills.
+NAVY = "none"                 # kept name; no solid blocks in editorial mode
+GOLD = "#D97757"              # Claude coral (single accent)
+LIGHT = "#F5F3EE"             # parchment header strip
+GRAY = "#6E6A60"              # stone meta/labels
+LINE = "#D9D3C7"              # hairline rules
+WHITE = "#FFFFFF"             # paper
+TINT = "#FBFAF7"              # zebra/total strip
+INK = "#1F1E1D"               # warm near-black text
+SOFT = "#ECE9E2"              # row separators
+CORAL = GOLD
 
 TARGETS = (
     "templates/contractor-daily-labor-template.ods",
@@ -78,24 +83,25 @@ class Styles:
 
     def __init__(self, doc):
         self.doc = doc
-        self.band = self.style("band", bg=NAVY, border="0.5pt solid " + NAVY)
-        self.band_t = self.text("bandt", color=WHITE, bold=True,
+        # editorial system: white paper, weight + hairlines, one coral rule
+        self.band = self.style("band", bg=LIGHT,
+                               border="0.5pt solid " + LINE)
+        self.band_t = self.text("bandt", color=INK, bold=True,
                                 align="center")
-        self.grid = self.style("grid", border="0.5pt solid " + LINE)
-        self.total = self.style("total", bg=LIGHT,
-                                border="0.5pt solid " + NAVY)
-        self.total_t = self.text("totalt", color=NAVY, bold=True)
-        self.label = self.style("label", bg=TINT)
-        self.label_t = self.text("labelt", color=NAVY, bold=True)
-        self.value_t = self.text("valuet")
+        self.grid = self.style("grid", border="0.35pt solid " + SOFT)
+        self.total = self.style("total", border="1pt solid " + CORAL)
+        self.total_t = self.text("totalt", color=CORAL, bold=True)
+        self.label = self.style("label")
+        self.label_t = self.text("labelt", color=GRAY, size="9pt")
+        self.value_t = self.text("valuet", color=INK, bold=True)
         self.hint = self.text("hint", color=GRAY, italic=True, size="9pt",
                               align="center")
-        self.hero = self.style("hero", bg=NAVY, border="0.5pt solid " + NAVY)
-        self.hero_t = self.text("herot", color=WHITE, bold=True,
-                                align="center", size="22pt")
+        self.hero = self.style("hero", border="0.5pt solid " + LINE)
+        self.hero_t = self.text("herot", color=INK, bold=True,
+                                align="center", size="15pt")
         self.tint = self.style("tint", bg=TINT)
-        self.center = self.text("center", align="center")
-        self.right = self.text("right", color=NAVY, align="end")
+        self.center = self.text("center", color=INK, align="center")
+        self.right = self.text("right", color=INK, align="end")
 
     def style(self, name, *, bg=None, border=None):
         st = Style(name="a_" + name, family="table-cell")
@@ -253,10 +259,17 @@ def restyle_hr(path: Path):
     s = Styles(doc)
     s.clean()
     s = Styles(doc)
-    rule = s.style("rule", border="0.05cm solid " + GOLD)
+    rtl = "_ar" in path.name
+    if rtl:   # Arabic letters: same styles, reading edge = right
+        s.label_t = s.text("labeltr", color=GRAY, size="9pt",
+                           align="end", italic=False)
+        s.value_t = s.text("valuetr", color=INK, bold=True, align="end")
+    rule = s.style("rule", border="1.5pt solid " + GOLD)
     tab = ots.first_table(doc)
     replaced = 0
-    for r in tab.getElementsByType(TableRow):
+    title_ts = s.text("hrtitle", color=INK, bold=True, size="14pt",
+                      align="end" if rtl else "left")
+    for ri, r in enumerate(tab.getElementsByType(TableRow)):
         for c in cells(r):
             t = ots.cell_text(c)
             if DASH_RUN.match(t or ""):
@@ -271,6 +284,11 @@ def restyle_hr(path: Path):
             elif t.endswith(":") or t.endswith(":"):
                 for p in c.getElementsByType(P):
                     p.setAttribute("stylename", s.label_t)
+        if ri == 0:      # document title row
+            for c in cells(r):
+                if (ots.cell_text(c) or "").strip():
+                    for p in c.getElementsByType(P):
+                        p.setAttribute("stylename", title_ts)
     ots.save(doc, str(path))
     print("restyled(hr): %s (rules fixed: %d)" % (path.name, replaced))
 
