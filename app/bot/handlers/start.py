@@ -6,8 +6,9 @@ from app.services.daily_dashboard_service import DailyDashboardService, Dashboar
 from app.bot import site_session
 from app.repositories.report_repository import ReportRepository
 from app.bot.keyboards import (
-    main_menu_keyboard, report_actions_keyboard, confirmation_keyboard,
+    start_menu_keyboard, report_actions_keyboard, confirmation_keyboard,
     contractor_selection_keyboard, contractor_reports_keyboard,
+    send_step, finish_step, VIEW_ONLY_HINT,
 )
 from app.services.arabic_date_service import ArabicDateService
 from app.services.auto_save_service import AutoSaveService
@@ -20,6 +21,30 @@ from app.models.database import Report, ReportStatus
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+BOT_COMMANDS: list[tuple[str, str]] = [
+    ("start", "Today's dashboard"),
+    ("new", "Start a new report"),
+    ("copy", "Copy yesterday's report"),
+    ("done", "Finish the current report"),
+    ("search", "Find reports by date or name"),
+    ("get", "Get a report PDF by date"),
+    ("myday", "Your attendance today"),
+    ("checkin", "Check in for today"),
+    ("checkout", "Check out for today"),
+    ("hr", "HR services menu"),
+    ("leave", "Request leave"),
+    ("mypay", "Your salary summary"),
+    ("help", "All commands grouped"),
+    ("cancel", "Cancel and back to dashboard"),
+    ("admin", "Admin panel"),
+]
+
+
+async def post_init_commands(app) -> None:
+    """Telegram command menu (called as Application post_init)."""
+    from telegram import BotCommand
+    await app.bot.set_my_commands([BotCommand(c, d) for c, d in BOT_COMMANDS])
 
 
 def _get_auth(context: ContextTypes.DEFAULT_TYPE):
@@ -89,25 +114,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     from app.utils.business_hours import is_business_hours
     in_business_hours = is_business_hours()
 
+    name = (user_info.first_name or user_info.username or "there").split()[0]
+    status = dash.report_status.replace('_', ' ').title()
     text = (
-        f"\U0001f4cb *Labor Report Bot*\n\n"
-        f"\U0001f4c5 {dash.date} ({dash.day})\n"
-        f"\u23f0 {dash.time}\n\n"
-
-        f"*Status:* {dash.report_status.replace('_', ' ').title()}\n"
-        f"*Contractors:* {dash.contractor_count}\n"
-        f"*Total Workers:* {dash.total_workers}\n"
-        f"*Time Remaining:* {dash.time_remaining if dash.time_remaining else 'N/A'}"
+        f"Hey {name} \U0001f44b — here's today at a glance:\n\n"
+        f"\U0001f4c5 {dash.date} ({dash.day}) · \u23f0 {dash.time}\n"
+        f"Status: *{status}* · Contractors: *{dash.contractor_count}* · Workers: *{dash.total_workers}*\n"
+        f"Time remaining: *{dash.time_remaining if dash.time_remaining else 'N/A'}*\n\n"
+        f"Pick one to continue \U0001f447"
     )
 
-    keyboard = main_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
+    keyboard = start_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
+    from app.bot.keyboards import _get_role_level as _lvl
+    if _lvl(role) >= 20 and not (_lvl(role) >= 40 and in_business_hours):
+        text += f"\n\n_{VIEW_ONLY_HINT}_"
 
     if update.callback_query:
         await update.callback_query.edit_message_text(
             text, reply_markup=keyboard, parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        # ponytail: quote pattern for A2 to copy (reply_to_message_id)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown",
+                                        reply_to_message_id=update.message.message_id)
 
 
 def _notify_admin_new_user(
@@ -168,26 +197,33 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     auth = _get_auth(context)
 
     text = (
-        "*Labor Report Bot Commands*\n\n"
-        "Use the buttons below to navigate:\n\n"
-        "📝 *Create Report* - Start a new daily report\n"
-        "📋 *Copy Yesterday* - Copy yesterday's report\n"
-        "📂 *Open Draft* - Edit today's draft\n"
-        "👁 *View Report* - See today's report\n"
-        "📄 *Download PDF* - Get today's PDF\n"
-        "🔍 *Search Reports* - Find reports by date, contractor\n"
-        "📊 *Contractor Reports* - Get automated reports\n"
-        "⚙️ *Admin Panel* - Admin functions\n\n"
-
-        "*Quick Tips:*\n"
-        "• Just type a date like `12-07-2026` or `yesterday` to get the PDF\n"
-        "• Use /start to return to the dashboard\n"
-        "• All features are accessible via the buttons"
+        "*Labor Report Bot — commands*\n\n"
+        "📝 *Reports*\n"
+        "/new — Start a new report\n"
+        "/copy — Copy yesterday's report\n"
+        "/done — Finish the current report\n"
+        "/search — Find reports by date or name\n"
+        "/get — Get a report PDF by date\n\n"
+        "👷 *Attendance*\n"
+        "/myday — Your attendance today\n"
+        "/checkin — Check in for today\n"
+        "/checkout — Check out for today\n\n"
+        "💼 *HR & Pay*\n"
+        "/hr — HR services menu\n"
+        "/leave — Request leave\n"
+        "/mypay — Your salary summary\n\n"
+        "⚙️ *General*\n"
+        "/start — Today's dashboard\n"
+        "/help — All commands grouped\n"
+        "/cancel — Cancel and back to dashboard\n"
+        "/admin — Admin panel\n\n"
+        "_Tip:_ type a date like `12-07-2026` or `yesterday` to get the PDF."
     )
 
     # Handle both message and callback query
     if update.message:
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="Markdown",
+                                        reply_to_message_id=update.message.message_id)
     elif update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown")
     else:
@@ -280,7 +316,10 @@ async def dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"*Time Remaining:* {dash.time_remaining if dash.time_remaining else 'N/A'}"
     )
 
-    keyboard = main_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
+    keyboard = start_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
+    from app.bot.keyboards import _get_role_level as _lvl2
+    if _lvl2(role) >= 20 and not (_lvl2(role) >= 40 and in_business_hours):
+        text += f"\n\n_{VIEW_ONLY_HINT}_"
 
     # Handle "Message is not modified" error gracefully
     try:
@@ -630,6 +669,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
 
             preview_service = context.bot_data.get("pdf_preview_service")
             if preview_service:
+                card = await send_step((context.bot, update.effective_chat.id), "Building preview PDF")
                 pdf_path = preview_service.generate_preview(report)
                 if report.is_draft:
                     repo.update(report)
@@ -644,10 +684,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
                 except Exception as audit_e:
                     logger.warning("Failed to audit log export: %s", audit_e)
 
-                await query.edit_message_text(
-                    "\U0001f4c4 *PDF Generated*\n\nSending PDF...",
-                    parse_mode="Markdown",
-                )
+                await finish_step(card, "Preview ready")
                 await context.bot.send_document(
                     chat_id=update.effective_chat.id,
                     document=InputFile(Path(pdf_path).read_bytes(), filename=f"Labor_Report_{today}.pdf"),
@@ -747,7 +784,7 @@ async def handle_main_menu_callback(update: Update, context: ContextTypes.DEFAUL
             await query.edit_message_text(f"Could not approve: {e}")
             return
         await query.edit_message_text(
-            f"\u2705 *Report Approved*\n\nLock it with /lock.",
+            f"\u2705 *Report Approved* (by {chat_id})\n\nLock it with /lock.",
             reply_markup=report_actions_keyboard(report.status.value,
                                                  role=role),
             parse_mode="Markdown",
@@ -980,11 +1017,13 @@ async def handle_confirmation_callback(update: Update, context: ContextTypes.DEF
                 preview_service = context.bot_data.get("pdf_preview_service")
                 if preview_service:
                     try:
+                        card = await send_step((context.bot, update.effective_chat.id), "Building final PDF")
                         pdf_path = preview_service.generate_preview(report)
                         await context.bot.send_document(
                             chat_id=update.effective_chat.id,
                             document=InputFile(Path(pdf_path).read_bytes(), filename=f"Labor_Report_{today}.pdf"),
                         )
+                        await finish_step(card, "Final PDF ready")
                     except Exception as pdf_e:
                         logger.error("Failed to send PDF after finalize: %s", pdf_e)
 
@@ -1635,14 +1674,12 @@ async def preview_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         preview_service = context.bot_data.get("pdf_preview_service")
         if preview_service:
+            card = await send_step(update.message, "Building preview PDF", quote_id=update.message.message_id)
             pdf_path = preview_service.generate_preview(report)
             if report.is_draft:
                 repo.update(report)
 
-            await update.message.reply_text(
-                "\U0001f4c4 *PDF Generated*\n\nSending PDF...",
-                parse_mode="Markdown",
-            )
+            await finish_step(card, "Preview ready")
             await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=InputFile(Path(pdf_path).read_bytes(), filename=f"Labor_Report_{today}.pdf"),
@@ -1861,11 +1898,12 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"Could not approve: {e}")
         return
     await update.message.reply_text(
-        f"\u2705 *Report Approved*\n\nDate: {report.date}\n"
+        f"\u2705 *Report Approved* (by {chat_id})\n\nDate: {report.date}\n"
         f"Status: *{report.status.value}*\n\nLock it with /lock.",
         reply_markup=report_actions_keyboard(report.status.value,
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
+        reply_to_message_id=update.message.message_id,
     )
     await _report_notice(context, "report_approved", report.telegram_user,
                          site, report.date, reference=f"review:{report.date}")
@@ -1897,11 +1935,12 @@ async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"Could not reject: {e}")
         return
     await update.message.reply_text(
-        f"\U0001f501 *Report Rejected*\n\nDate: {report.date}\n"
+        f"\U0001f501 *Report Rejected* (by {chat_id})\n\nDate: {report.date}\n"
         f"Reason: {report.reject_note}\n\nFix it, then /resubmit.",
         reply_markup=report_actions_keyboard(report.status.value,
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
+        reply_to_message_id=update.message.message_id,
     )
     await _report_notice(context, "report_rejected", report.telegram_user,
                          site, report.date, reference=f"review:{report.date}",
@@ -1974,10 +2013,11 @@ async def handle_report_reject_note(update: Update,
     context.user_data.pop("report_reject_site", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(
-        f"\U0001f501 *Report Rejected*\n\nReason: {report.reject_note}",
+        f"\U0001f501 *Report Rejected* (by {chat_id})\n\nReason: {report.reject_note}",
         reply_markup=report_actions_keyboard(report.status.value,
                                              role=_get_role(context, chat_id)),
         parse_mode="Markdown",
+        reply_to_message_id=update.message.message_id,
     )
     await _report_notice(context, "report_rejected", report.telegram_user,
                          saved_site, report.date,
@@ -1986,6 +2026,7 @@ async def handle_report_reject_note(update: Update,
 
 
 def get_registration_handlers() -> list:
+    from app.utils.business_hours import get_offhours_handlers
     return [
         CommandHandler("start", start_command),        CommandHandler("help", help_command),
         CommandHandler("cancel", cancel_command),
@@ -2002,4 +2043,5 @@ def get_registration_handlers() -> list:
         CallbackQueryHandler(handle_confirmation_callback, pattern="^(confirm:|cancel:)"),
         CallbackQueryHandler(handle_contractor_report_period, pattern="^report_period:"),
         CallbackQueryHandler(handle_report_contractor_selection, pattern="^rc:"),
+        *get_offhours_handlers(),
     ]

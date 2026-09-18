@@ -331,27 +331,32 @@ async def handle_att_note(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # --- day aggregate (026) ---
 
+def _md_escape(value: object) -> str:
+    # ponytail: legacy-Markdown minimal escape (_ * ` [ + backslash); use HTML if richer formatting needed
+    return str(value).replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+
+
 def _render_day(view: dict) -> str:
     day = view["day"]
     lines = [
-        f"*Day {day.day_date}* at `{day.site_id}` - `{day.status}`",
-        f"Origin: {day.origin}",
+        f"*Day {_md_escape(day.day_date)}* at `{_md_escape(day.site_id)}` - `{_md_escape(day.status)}`",
+        f"Origin: {_md_escape(day.origin)}",
     ]
     if day.first_in:
-        lines.append(f"First in: {day.first_in[11:16]}")
+        lines.append(f"First in: {_md_escape(day.first_in[11:16])}")
     if day.last_out:
-        lines.append(f"Last out: {day.last_out[11:16]}")
+        lines.append(f"Last out: {_md_escape(day.last_out[11:16])}")
     if day.late_minutes:
-        lines.append(f"Late: {day.late_minutes} min (fact, not punishment)")
+        lines.append(f"Late: {_md_escape(day.late_minutes)} min (fact, not punishment)")
     if day.verdict:
-        lines.append(f"Verdict: `{day.verdict}`")
+        lines.append(f"Verdict: `{_md_escape(day.verdict)}`")
     if day.resolution_note:
-        lines.append(f"Resolution: {day.resolution_note}")
+        lines.append(f"Resolution: {_md_escape(day.resolution_note)}")
     anomalies = view["anomalies"]
     if anomalies:
-        lines.append("Anomalies: " + ", ".join(anomalies))
+        lines.append("Anomalies: " + ", ".join(_md_escape(a) for a in anomalies))
     if view.get("required") is False:
-        lines.append(f"Non-working day ({view.get('calendar_note') or 'calendar'})")
+        lines.append(f"Non-working day ({_md_escape(view.get('calendar_note') or 'calendar')})")
     claims = [c for c in view["claims"] if c.status == "open"]
     if claims:
         lines.append(f"Open claims: {len(claims)}")
@@ -459,7 +464,8 @@ async def dayclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except DatabaseError as e:
         await update.message.reply_text(f"Could not file: {e}")
         return
-    await update.message.reply_text(f"Claim `#{claim.id}` filed for review.")
+    await update.message.reply_text(f"Claim `#{claim.id}` filed for review.",
+                                      reply_to_message_id=update.message.message_id)
 
 
 async def claims_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -479,8 +485,8 @@ async def claims_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     for claim in rows[:10]:
         await update.message.reply_text(
-            f"*Claim #{claim.id}* ({claim.kind}) `{claim.chat_id}` "
-            f"{claim.day_date}\n{claim.text}", parse_mode="Markdown",
+            f"*Claim #{_md_escape(claim.id)}* ({_md_escape(claim.kind)}) `{_md_escape(claim.chat_id)}` "
+            f"{_md_escape(claim.day_date)}\n{_md_escape(claim.text)}", parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("Approve",
                                      callback_data=f"day_claim_ok:{claim.id}"),
@@ -606,7 +612,8 @@ async def handle_claim_note(update: Update,
     context.user_data.pop("day_claim_id", None)
     context.user_data.pop("day_claim_approve", None)
     context.user_data.pop("state", None)
-    await update.message.reply_text(f"Claim `#{claim.id}` {claim.status}.")
+    await update.message.reply_text(f"Claim `#{claim.id}` {claim.status} (decided by {chat_id}).",
+                                      reply_to_message_id=update.message.message_id)
     from app.bot.notify import notify
 
     await notify(context, "claim_decision", claim.chat_id, claim.site_id,

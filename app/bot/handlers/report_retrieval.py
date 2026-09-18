@@ -14,8 +14,7 @@ Supported date formats:
   - DD-MM-YYYY, DD/MM/YYYY
   - DD.MM.YYYY
   - YYYYMMDD (compact)
-  - "yesterday", "yest" (English)
-  - "امس", "أمس" (Arabic)
+  - "yesterday", "yest" (English only)
 """
 
 import logging
@@ -236,8 +235,7 @@ async def get_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Examples:\n"
             "  `/get 2026-07-12`\n"
             "  `/get yesterday`\n"
-            "  `/get 12/07/2026`\n"
-            "  `/get امس`\n\n"
+            "  `/get 12/07/2026`\n\n"
             "You can also just type a date directly!",
             parse_mode="Markdown",
         )

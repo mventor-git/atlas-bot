@@ -118,19 +118,19 @@ class TestDailyDashboardService:
     # ------------------------------------------------------------------
 
     def test_arabic_date_format(self, service: DailyDashboardService):
-        """Dashboard should show Arabic-formatted date."""
+        """Dashboard should show English-formatted date."""
         fixed_now = datetime(2026, 7, 11, 10, 0)
         dash = service.get_dashboard(today="2026-07-11", now_time=fixed_now)
-        expected_date = ArabicDateService.get_arabic_date(date(2026, 7, 11))
+        expected_date = date(2026, 7, 11).strftime("%d / %m / %Y")
         assert dash.date == expected_date, (
             f"Expected {expected_date}, got {dash.date}"
         )
 
     def test_arabic_day_name(self, service: DailyDashboardService):
-        """Dashboard should show Arabic day name."""
+        """Dashboard should show English day name."""
         fixed_now = datetime(2026, 7, 11, 10, 0)  # Saturday
         dash = service.get_dashboard(today="2026-07-11", now_time=fixed_now)
-        expected_day = ArabicDateService.get_arabic_day_name(date(2026, 7, 11))
+        expected_day = ArabicDateService.get_day_name(date(2026, 7, 11))
         assert dash.day == expected_day, (
             f"Expected {expected_day}, got {dash.day}"
         )
@@ -398,8 +398,8 @@ class TestDailyDashboardService:
         fixed_now = datetime(2026, 7, 11, 11, 30)
         dash = service.get_dashboard(today="2026-07-11", now_time=fixed_now)
 
-        assert dash.date == ArabicDateService.get_arabic_date(date(2026, 7, 11))
-        assert dash.day == "السبت"
+        assert dash.date == date(2026, 7, 11).strftime("%d / %m / %Y")
+        assert dash.day == "Saturday"
         assert dash.time == "11:30"
         assert dash.report_status == "draft"
         assert dash.contractor_count == 2

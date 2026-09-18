@@ -738,11 +738,11 @@ class TestAsyncHandlers:
 
         # Verify reply was called
         update.message.reply_text.assert_called_once()
-        # Verify the reply contains button descriptions
+        # Verify the reply contains grouped command descriptions
         call_args = update.message.reply_text.call_args[0][0]
-        assert "View Report" in call_args
-        assert "Create Report" in call_args
-        assert "Download PDF" in call_args
+        assert "/new" in call_args
+        assert "/search" in call_args
+        assert "/myday" in call_args
         assert "/start" in call_args
 
     @pytest.mark.asyncio

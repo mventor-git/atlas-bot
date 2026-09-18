@@ -1,4 +1,62 @@
-﻿from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+﻿from datetime import datetime
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+from app.bot.flood import FLOOD_FRIENDLY, guarded
+
+
+def _now_hm() -> str:
+    return datetime.now().strftime("%H:%M")
+
+
+async def _flood_card(source) -> None:
+    """One friendly fail-closed card; best-effort (never raises, never retries)."""
+    try:
+        if hasattr(source, "reply_text"):
+            await source.reply_text(FLOOD_FRIENDLY)
+        else:
+            bot, chat_id = source
+            await bot.send_message(chat_id=chat_id, text=FLOOD_FRIENDLY)
+    except Exception:
+        pass
+
+
+async def send_step(source, text: str, quote_id: int | None = None):
+    """Progress card start: `⏳ <text>…` + timestamp. Returns message to edit.
+
+    source: telegram Message (has reply_text) or (bot, chat_id) tuple.
+    quote_id: reply_to_message_id — pass the triggering message id to quote it.
+    Flood: single retry under the 5s cap, else one friendly card (no spam).
+    """
+    body = f"\u23f3 {text}\u2026\n_{_now_hm()}_"
+    if hasattr(source, "reply_text"):
+        qid = quote_id if quote_id is not None else getattr(source, "message_id", None)
+        try:
+            if qid is not None:
+                card = await guarded(lambda: source.reply_text(body, parse_mode="Markdown", reply_to_message_id=qid))
+                if card is None:
+                    await _flood_card(source)
+                return card
+        except TypeError:
+            pass
+        try:
+            return await guarded(lambda: source.reply_text(body, parse_mode="Markdown"))
+        except Exception:
+            return None
+    bot, chat_id = source  # ponytail: callback flows pass (bot, chat_id), no new API
+    try:
+        return await guarded(lambda: bot.send_message(chat_id=chat_id, text=body, parse_mode="Markdown"))
+    except Exception:
+        return None
+
+
+async def finish_step(msg, text: str) -> None:
+    """Progress card end: edit card to `✅ <text>` + timestamp (no spam)."""
+    if msg is None:
+        return
+    try:
+        await guarded(lambda: msg.edit_text(f"\u2705 {text}\n_{_now_hm()}_", parse_mode="Markdown"))
+    except Exception:
+        pass
 
 
 def _get_role_level(role: str) -> int:
@@ -59,6 +117,45 @@ def hr_month_keyboard(request_id: int) -> InlineKeyboardMarkup:
     if row:
         buttons.append(row)
     return InlineKeyboardMarkup(buttons)
+
+
+VIEW_ONLY_HINT = "You can view; ask an admin for create rights \u2014 /users shows admins"
+
+
+def cap_buttons(buttons: list, limit: int = 3) -> InlineKeyboardMarkup:
+    """Cap any button list to <=limit, one per row. Start-path seam."""
+    return InlineKeyboardMarkup([[b] for b in buttons[:limit]])
+
+
+def start_menu_keyboard(report_status: str, role: str = "pending", has_reports: bool = False, is_business_hours: bool = True) -> InlineKeyboardMarkup:
+    """Start-path only (max 3 smart buttons). Other callers keep main_menu_keyboard."""
+    B = InlineKeyboardButton
+    level = _get_role_level(role)
+    can_create = level >= 40 and is_business_hours
+    can_view = level >= 20
+    if report_status in ("not_created", "no_report"):
+        if can_create:
+            btns = [B("➕ New report", callback_data="create_report"), B("📋 Copy yesterday", callback_data="copy_yesterday"), B("🔍 Search", callback_data="search")]
+        elif can_view or has_reports:
+            btns = [B("🔍 Search", callback_data="search"), B("📊 Contractor reports", callback_data="contractor_reports"), B("❓ Help", callback_data="help")]
+        else:
+            btns = [B("❓ Help", callback_data="help")]
+    elif report_status == "draft":
+        if can_create:
+            btns = [B("📂 Open draft", callback_data="open_draft"), B("👁 Preview PDF", callback_data="preview_pdf"), B("✅ Finalize", callback_data="finalize")]
+        else:
+            btns = [B("👁 View report", callback_data="view_report"), B("🔍 Search", callback_data="search"), B("❓ Help", callback_data="help")]
+    elif report_status == "final":
+        if can_view or can_create:
+            btns = [B("👁 View report", callback_data="view_report"), B("📄 Download PDF", callback_data="download_pdf"), B("🔍 Search", callback_data="search")]
+        else:
+            btns = [B("❓ Help", callback_data="help")]
+    else:  # locked / approved / rejected / unknown
+        if can_view or can_create:
+            btns = [B("👁 View report", callback_data="view_report"), B("🔍 Search", callback_data="search"), B("❓ Help", callback_data="help")]
+        else:
+            btns = [B("❓ Help", callback_data="help")]
+    return cap_buttons(btns, 3)
 
 
 def main_menu_keyboard(report_status: str, role: str = "pending", has_reports: bool = False, is_business_hours: bool = True) -> InlineKeyboardMarkup:

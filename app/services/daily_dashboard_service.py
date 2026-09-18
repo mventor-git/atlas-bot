@@ -1,13 +1,13 @@
 ﻿"""Daily Dashboard Service for Labor-Report. (mventor-ticket-014)
 
 Provides a comprehensive dashboard view of today's report status,
-including Arabic-formatted date/time, contractor summary, submission
+including English-formatted date/time, contractor summary, submission
 countdown, and context-sensitive quick action buttons.
 
 Typical usage:
     service = DailyDashboardService(report_repo, config)
     dashboard = service.get_dashboard(telegram_user="user123")
-    # dashboard.date -> "١٥ / ٠٨ / ٢٠٢٦"
+    # dashboard.date -> "15 / 08 / 2026"
     # dashboard.buttons -> ["Open Draft", "Search"]
 """
 
@@ -33,10 +33,10 @@ class DashboardData:
     """
 
     date: str
-    """Today's date in Arabic-Indic digits (e.g. '١٥ / ٠٨ / ٢٠٢٦')."""
+    """Today's date in English digits (e.g. '15 / 08 / 2026')."""
 
     day: str
-    """Arabic day name (e.g. 'السبت')."""
+    """English day name (e.g. 'Saturday')."""
 
     time: str
     """Current server time formatted as HH:MM."""
@@ -61,7 +61,7 @@ class DashboardData:
 class DailyDashboardService:
     """Builds a dashboard snapshot of today's report.
 
-    Combines Arabic date/time formatting with report data from the
+    Combines English date/time formatting with report data from the
     database and config-driven deadline calculations.
     """
 
@@ -113,15 +113,15 @@ class DailyDashboardService:
                     pass
             now_time = get_now_in_timezone(tz_name)
 
-        # Parse the target date for Arabic formatting
+        # Parse the target date for English formatting (bot surfaces are English-only)
         try:
             target_date = date.fromisoformat(today)
         except (ValueError, TypeError):
             target_date = now_time.date()
 
-        # Arabic formatting
-        arabic_date = ArabicDateService.get_arabic_date(target_date)
-        day_name = ArabicDateService.get_arabic_day_name(target_date)
+        # English formatting
+        arabic_date = target_date.strftime("%d / %m / %Y")
+        day_name = ArabicDateService.get_day_name(target_date)
         time_str = now_time.strftime("%H:%M")
 
         # Fetch today's report

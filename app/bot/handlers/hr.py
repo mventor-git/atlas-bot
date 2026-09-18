@@ -23,6 +23,7 @@ from telegram.ext import (
 
 from app.bot import site_session
 from app.bot.keyboards import hr_menu_keyboard, hr_month_keyboard
+from app.bot.vendor_hermes import normalize_telegram_chat_id, visible_text
 from app.models.hr import HRRequest, HRRequestStatus, HRRequestType
 from app.services.hr_service import HRService
 from app.utils.exceptions import DatabaseError
@@ -36,7 +37,7 @@ logger = get_logger(__name__)
 def _me(update: Update) -> tuple[str, str]:
     user = update.effective_user
     name = f"{user.first_name or ''} {user.last_name or ''}".strip() or str(user.id)
-    return str(user.id), name
+    return str(normalize_telegram_chat_id(user.id)), name
 
 
 def _auth(context: ContextTypes.DEFAULT_TYPE):
@@ -60,7 +61,7 @@ def _render(req: HRRequest) -> str:
     kind = "Advance" if req.request_type == HRRequestType.ADVANCE else "Transport"
     lines = [
         f"*{kind} #{req.id}* - `{req.status}`",
-        f"From: {req.requester_name} (`{req.requester_chat_id}`)",
+        f"From: {req.requester_name}",
         f"Amount: {req.amount:g}",
         f"Reason: {req.reason}",
     ]
@@ -93,6 +94,46 @@ def _action_buttons(req: HRRequest, role: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("Reject", callback_data=f"hr_reject:{req.id}"),
         ])
     return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+_JUNK_REASONS = {"no reason", "none", "n/a", "na", "-", ".", "no", "skip", "test"}
+
+
+def _reason_ok(reason: str) -> bool:
+    text = (reason or "").strip()
+    return bool(text) and text.lower() not in _JUNK_REASONS
+
+
+def _queue_text(rows) -> str:
+    return "\n\n---\n\n".join(_render(r) for r in rows[:10])
+
+
+def _queue_keyboard(rows, role: str) -> InlineKeyboardMarkup | None:
+    # One message, one keyboard: per-request action rows keep callback_data
+    # (hr_confirm:<id> etc.) as the sole identity carrier — no chat IDs shown.
+    flat: list[list] = []
+    for req in rows[:10]:
+        markup = _action_buttons(req, role)
+        if markup:
+            for row in markup.inline_keyboard:
+                flat.extend([[b] for b in row])
+    return InlineKeyboardMarkup(flat) if flat else None
+
+
+async def _send_queue(update: Update, text: str,
+                      markup: InlineKeyboardMarkup | None) -> None:
+    # Single edit-in-place view: callback presses edit the same message, so
+    # repeat taps never stack duplicate cards. Plain commands still reply once.
+    query = update.callback_query
+    if query is not None:
+        try:
+            await query.edit_message_text(text, parse_mode="Markdown",
+                                          reply_markup=markup)
+            return
+        except Exception:
+            pass  # message deleted/identical: fall through to one reply
+    await update.effective_message.reply_text(text, parse_mode="Markdown",
+                                              reply_markup=markup)
 
 
 # --- entry points ---
@@ -139,9 +180,9 @@ async def my_requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not rows:
         await update.effective_message.reply_text("No HR requests.")
         return
-    for req in sorted(rows, key=lambda r: r.created_at)[:10]:
-        markup = _action_buttons(req, _role(update, context))
-        await update.effective_message.reply_text(_render(req), parse_mode="Markdown", reply_markup=markup)
+    rows = sorted(rows, key=lambda r: r.created_at)[:10]
+    await _send_queue(update, _queue_text(rows),
+                      _queue_keyboard(rows, _role(update, context)))
 
 
 async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,11 +202,9 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not rows:
         await update.effective_message.reply_text("Approval queue is empty.")
         return
-    for req in rows[:10]:
-        await update.effective_message.reply_text(
-            _render(req), parse_mode="Markdown",
-            reply_markup=_action_buttons(req, role),
-        )
+    rows = rows[:10]
+    await _send_queue(update, _queue_text(rows),
+                      _queue_keyboard(rows, role))
 
 
 # --- text states ---
@@ -184,9 +223,9 @@ async def handle_hr_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_hr_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reason = (update.message.text or "").strip()
-    if not reason:
-        await update.message.reply_text("Send the reason as text.")
+    reason = visible_text(update.message).strip()
+    if not _reason_ok(reason):
+        await update.message.reply_text("Send a real reason - what is the money for?")
         return
     flow = context.user_data["hr_flow"]
     flow["reason"] = reason
@@ -215,13 +254,8 @@ async def handle_hr_report_ref(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("Send the receipt photo, or /hr_skip.")
 
 
-async def handle_hr_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.user_data.get("state") != "awaiting_hr_receipt":
-        return  # not our flow - ignore silently
-    flow = context.user_data.get("hr_flow", {})
-    if not update.message.photo:
-        await update.message.reply_text("Send a photo of the receipt, or /skip.")
-        return
+async def _save_receipt_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: dict) -> bool:
+    """Download the best photo into exports/receipts; True on success."""
     try:
         photo = update.message.photo[-1]
         target = Path("exports/receipts")
@@ -230,9 +264,37 @@ async def handle_hr_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         tg_file = await photo.get_file()
         await tg_file.download_to_drive(str(dest))
         flow["receipt_path"] = str(dest)
+        return True
     except Exception as e:
         logger.warning("Receipt download failed: %s", e)
         await update.message.reply_text("Could not save that photo - try again or /skip.")
+        return False
+
+
+async def _flush_receipt_album(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
+    """Album flush: one download + one Filed card for the whole group."""
+    if context.user_data.get("state") != "awaiting_hr_receipt":
+        return
+    flow = context.user_data.get("hr_flow", {})
+    if not getattr(update.message, "photo", None):
+        return
+    if not await _save_receipt_photo(update, context, flow):
+        return
+    await _create_request(update, context)
+
+
+async def handle_hr_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if context.user_data.get("state") != "awaiting_hr_receipt":
+        return  # not our flow - ignore silently
+    flow = context.user_data.get("hr_flow", {})
+    if not update.message.photo:
+        await update.message.reply_text("Send a photo of the receipt, or /skip.")
+        return
+    from app.bot.media_debounce import debounce_album  # ponytail: album glue only
+
+    if await debounce_album(update, context, _flush_receipt_album):
+        return  # grouped photo held; single flush files one request
+    if not await _save_receipt_photo(update, context, flow):
         return
     await _create_request(update, context)
 
@@ -254,6 +316,18 @@ async def handle_hr_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id, name = _me(update)
     flow = context.user_data.get("hr_flow", {})
+    try:
+        amount = float(flow.get("amount", 0))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0:
+        context.user_data["state"] = "awaiting_hr_amount"
+        await update.message.reply_text("Send a positive number for the amount.")
+        return
+    if not _reason_ok(flow.get("reason", "")):
+        context.user_data["state"] = "awaiting_hr_reason"
+        await update.message.reply_text("Send a real reason - what is the money for?")
+        return
     service = _hr(context)
     try:
         if flow.get("type") == HRRequestType.TRANSPORT:
@@ -276,6 +350,7 @@ async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         f"Filed:\n{_render(req)}\n\nStatus: pending PM confirmation.",
         parse_mode="Markdown",
+        reply_to_message_id=update.message.message_id,
     )
 
 
@@ -297,7 +372,8 @@ async def handle_reject_note(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("hr_reject_id", None)
     context.user_data.pop("hr_reject_site", None)
     context.user_data.pop("state", None)
-    await update.message.reply_text(f"Rejected:\n{_render(req)}", parse_mode="Markdown")
+    await update.message.reply_text(f"Rejected by {name}:\n{_render(req)}", parse_mode="Markdown",
+                                      reply_to_message_id=update.message.message_id)
     from app.bot.notify import notify
 
     await notify(context, "leave_decision", req.requester_chat_id,
@@ -366,7 +442,8 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("hr_approve_site", None)
     context.user_data.pop("state", None)
     await _after_approval(update, context, service, req)
-    await update.message.reply_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
+    await update.message.reply_text(f"Approved by {name}:\n{_render(req)}", parse_mode="Markdown",
+                                    reply_to_message_id=update.message.message_id)
     from app.bot.notify import notify
 
     await notify(context, "leave_decision", req.requester_chat_id,
@@ -442,7 +519,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not confirm: {e}")
             return
-        await query.edit_message_text(f"Confirmed:\n{_render(req)}", parse_mode="Markdown")
+        await query.edit_message_text(f"Confirmed by {name}:\n{_render(req)}", parse_mode="Markdown")
         from app.bot.notify import notify
 
         await notify(context, "leave_decision", req.requester_chat_id,
@@ -481,7 +558,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.edit_message_text(f"Could not approve: {e}")
                 return
             await _after_approval(update, context, service, decided)
-            await query.edit_message_text(f"Approved:\n{_render(decided)}", parse_mode="Markdown")
+            await query.edit_message_text(f"Approved by {name}:\n{_render(decided)}", parse_mode="Markdown")
             from app.bot.notify import notify
 
             await notify(context, "leave_decision", decided.requester_chat_id,
@@ -510,7 +587,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("hr_approve_id", None)
         context.user_data.pop("state", None)
         await _after_approval(update, context, service, req)
-        await query.edit_message_text(f"Approved:\n{_render(req)}", parse_mode="Markdown")
+        await query.edit_message_text(f"Approved by {name}:\n{_render(req)}", parse_mode="Markdown")
         from app.bot.notify import notify
 
         await notify(context, "leave_decision", req.requester_chat_id,
@@ -616,8 +693,23 @@ async def member_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     _, action, target, site_id = parts[:4]
     known = {s["id"] for s in _sites(context.bot_data.get("app_config"))}
     if site_id not in known:
-        await update.message.reply_text(
-            f"Unknown site `{site_id}`. Configured: {', '.join(sorted(known))}")
+        from difflib import get_close_matches as _close
+        from telegram import InlineKeyboardButton as _B, InlineKeyboardMarkup as _M
+        guess = (_close(site_id, sorted(known), n=1, cutoff=0.5) or [None])[0]
+        card = await update.message.reply_text(
+            f"\u23f3 Checking site `{site_id}`\u2026",
+            reply_to_message_id=update.message.message_id)
+        try:
+            hint = (f"Did you mean `{guess}`? Re-run: `/hr_member {action} {target} {guess}`"
+                    if guess else
+                    f"Unknown site `{site_id}`. Configured: {', '.join(sorted(known))}")
+            kb = (_M([[ _B(f"Did you mean {guess}?", callback_data="hr_site_hint") ]])
+                  if guess else None)
+            await card.edit_text(f"\u2705 {hint}", parse_mode="Markdown",
+                                 reply_markup=kb)
+        except Exception:
+            await update.message.reply_text(
+                f"Unknown site `{site_id}`. Configured: {', '.join(sorted(known))}")
         return
     auth = _auth(context)
     try:
@@ -760,7 +852,7 @@ async def overtime_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_lmo_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reason = (update.message.text or "").strip()
+    reason = visible_text(update.message).strip()
     if not reason:
         await update.message.reply_text("Send the reason as text.")
         return

@@ -11,7 +11,7 @@ from app.services.one_click_yesterday_service import OneClickYesterdayService
 from app.services.arabic_date_service import ArabicDateService
 from app.services.authorization_service import AuthorizationService
 from app.services.audit_service import AuditService
-from app.bot.keyboards import contractor_selection_keyboard, zone_selection_keyboard, report_actions_keyboard, confirmation_keyboard
+from app.bot.keyboards import contractor_selection_keyboard, zone_selection_keyboard, report_actions_keyboard, confirmation_keyboard, send_step, finish_step
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,9 +39,13 @@ async def new_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         report = auto_save_service.save_draft(report, telegram_user)
         context.user_data["current_report"] = report
         context.user_data["state"] = "awaiting_contractor_name"
+        if context.user_data.get("offhours_confirmed"):
+            context.user_data["report_offhours"] = True
+            logger.warning("off-hours report created user=%s date=%s", telegram_user, today)
 
         text = (
-            f"\U0001f4dd *New Report Created*\n\n"
+            f"\U0001f4dd *New Report Created*"
+            f"{' _(off-hours)_' if context.user_data.get('report_offhours') else ''}\n\n"
             f"Date: {today}\n\n"
             f"Send me the contractor name, or type /done to finish."
         )
@@ -57,9 +61,11 @@ async def new_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["search_page"] = 0
             context.user_data["search_total_pages"] = 1
             keyboard = contractor_selection_keyboard(contractor_tuples)
-            await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown",
+                                            reply_to_message_id=update.message.message_id)
         else:
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.message.reply_text(text, parse_mode="Markdown",
+                                            reply_to_message_id=update.message.message_id)
 
         logger.info("New report created: date=%s, user=%s", today, telegram_user)
     except Exception as e:
@@ -96,6 +102,9 @@ async def copy_yesterday_command(update: Update, context: ContextTypes.DEFAULT_T
         draft = auto_save_service.save_draft(draft, telegram_user)
         context.user_data["current_report"] = draft
         context.user_data["state"] = "idle"
+        if context.user_data.get("offhours_confirmed"):
+            context.user_data["report_offhours"] = True
+            logger.warning("off-hours report copied user=%s date=%s", telegram_user, today)
 
         items_text = ""
         total_workers = 0
@@ -105,7 +114,8 @@ async def copy_yesterday_command(update: Update, context: ContextTypes.DEFAULT_T
             items_text += f"\n\u2022 {item.contractor}: {w} workers"
 
         text = (
-            f"\U0001f4cb *Report Copied from Yesterday*\n\n"
+            f"\U0001f4cb *Report Copied from Yesterday*"
+            f"{' _(off-hours)_' if context.user_data.get('report_offhours') else ''}\n\n"
             f"Date: {today}\n"
             f"Source: {yesterday}\n"
             f"Contractors: {len(draft.items)}\n"
@@ -114,18 +124,21 @@ async def copy_yesterday_command(update: Update, context: ContextTypes.DEFAULT_T
         )
 
         keyboard = report_actions_keyboard("draft")
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown",
+                                        reply_to_message_id=update.message.message_id)
         logger.info("Yesterday report copied: user=%s, today=%s, yesterday=%s", telegram_user, today, yesterday)
 
         # Generate and send PDF
         try:
             preview_service = context.bot_data.get("pdf_preview_service")
             if preview_service and draft.items:
+                card = await send_step(update.message, "Building copy PDF", quote_id=update.message.message_id)
                 pdf_path = preview_service.generate_preview(draft)
                 await context.bot.send_document(
                     chat_id=update.effective_chat.id,
                     document=InputFile(Path(pdf_path).read_bytes(), filename=f"Labor_Report_{today}.pdf"),
                 )
+                await finish_step(card, "Copy ready")
         except Exception as pdf_e:
             logger.warning("Could not send PDF after copy yesterday: %s", pdf_e)
     except Exception as e:
@@ -584,18 +597,21 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"Total Workers: {total_workers}"
         )
         keyboard = report_actions_keyboard("draft")
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown",
+                                        reply_to_message_id=update.message.message_id)
         logger.info("Report done: user=%s, date=%s, contractors=%d", telegram_user, report.date, contractor_count)
 
         # Generate and send PDF
         try:
             preview_service = context.bot_data.get("pdf_preview_service")
             if preview_service and report.items:
+                card = await send_step(update.message, "Building summary PDF", quote_id=update.message.message_id)
                 pdf_path = preview_service.generate_preview(report)
                 await context.bot.send_document(
                     chat_id=update.effective_chat.id,
                     document=InputFile(Path(pdf_path).read_bytes(), filename=f"Labor_Report_{report.date}.pdf"),
                 )
+                await finish_step(card, "Summary ready")
         except Exception as pdf_e:
             logger.warning("Could not send PDF after /done: %s", pdf_e)
     except Exception as e:

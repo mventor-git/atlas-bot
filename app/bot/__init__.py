@@ -14,6 +14,17 @@ from app.utils.exceptions import ConfigurationError
 logger = get_logger(__name__)
 
 
+async def _on_error(update: object, context) -> None:
+    """Global error handler: log traceback, send one friendly line."""
+    logger.exception("Unhandled bot error: %s", context.error)
+    try:
+        msg = getattr(update, "message", None) or getattr(update, "callback_query", None)
+        if msg is not None:
+            await msg.reply_text("Sorry, something went wrong. Please try again.")
+    except Exception:  # never let the error handler itself crash
+        pass
+
+
 def _load_token() -> str:
     """Load the bot token from environment."""
     token = os.environ.get("BOT_TOKEN")
@@ -75,7 +86,8 @@ def create_bot_app(
         Configured Application (not running).
     """
     token = _load_token()
-    builder = ApplicationBuilder().token(token)
+    from app.bot.handlers.start import post_init_commands
+    builder = ApplicationBuilder().token(token).post_init(post_init_commands)
 
     app = builder.build()
 
@@ -113,6 +125,7 @@ def create_bot_app(
     )
 
     _register_handlers(app)
+    app.add_error_handler(_on_error)
     return app
 
 

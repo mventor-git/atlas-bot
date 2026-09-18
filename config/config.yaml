@@ -128,7 +128,7 @@ timezone:
 
 # Authorization
 auth:
-  superadmin: "0000000000"       # Telegram user ID with super admin privileges (set yours)
+  superadmin: ""       # Telegram user ID with super admin privileges (set yours)
   admins: []                     # Additional admin user IDs
 
 # Notification schedule

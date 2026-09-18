@@ -72,6 +72,8 @@ READ_ONLY_CALLBACKS = {
     "cancel_report",
     "cancel:finalize",
     "cancel:lock",
+    "offhours_proceed",
+    "offhours_cancel",
 }
 
 
@@ -91,13 +93,22 @@ def is_business_hours(now: datetime | None = None, timezone_name: str | None = N
     return WORK_START <= current_time < WORK_END
 
 
-def after_hours_message() -> str:
+OFFHOURS_PROCEED = "offhours_proceed"
+OFFHOURS_CANCEL = "offhours_cancel"
+OFFHOURS_FLAG = "offhours_confirmed"
+
+
+def after_hours_message(quoted: str | None = None) -> str:
     """Return a message to show when the bot is outside business hours."""
-    return (
+    base = (
         "\U0001f6ab *After Hours* \u2014 The bot is currently in read-only mode.\n\n"
         "Editing is available from *8:00 AM to 5:00 PM*.\n\n"
+        "Outside 8\u201317 \u2014 proceed anyway? Reports will be labeled _(off-hours)_.\n\n"
         "You can still view drafts and preview PDFs using the buttons below."
     )
+    if quoted:
+        return f"> {quoted}\n\n{base}"
+    return base
 
 
 def is_read_only_callback(callback_data: str) -> bool:
@@ -145,10 +156,60 @@ async def check_business_hours(
     if callback_data and is_read_only_callback(callback_data):
         return True
 
-    # Block the operation
-    msg = after_hours_message()
+    # Explicit off-hours confirmation still passes the permission check
+    # below untouched: callers keep their can_create_reports / role gates.
+    try:
+        if (context.user_data or {}).get(OFFHOURS_FLAG):
+            from app.utils.logger import get_logger as _get_logger
+            _get_logger(__name__).warning(
+                "off-hours proceed confirmed user=%s",
+                getattr(getattr(update, "effective_user", None), "id", "?"),
+            )
+            return True
+    except Exception:
+        pass
+
+    # Guided confirmation (friction pass): warn + [Proceed][Cancel], max 2
+    # buttons. Proceed path sets OFFHOURS_FLAG; permission checks stay.
+    from telegram import InlineKeyboardButton as _B, InlineKeyboardMarkup as _M
+    quoted = None
+    try:
+        quoted = (update.message.text or "") if update.message else None
+    except Exception:
+        quoted = None
+    msg = after_hours_message(quoted=quoted[:120] if quoted else None)
+    kb = _M([[ _B("\u2705 Proceed", callback_data=OFFHOURS_PROCEED),
+               _B("\u274c Cancel", callback_data=OFFHOURS_CANCEL) ]])
     if update.callback_query:
-        await update.callback_query.edit_message_text(msg, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(msg, parse_mode="Markdown",
+                                                      reply_markup=kb)
     elif update.message:
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown",
+                                            reply_markup=kb,
+                                            reply_to_message_id=update.message.message_id)
+        except TypeError:
+            await update.message.reply_text(msg, parse_mode="Markdown",
+                                            reply_markup=kb)
     return False
+
+
+async def handle_offhours_callback(update, context) -> None:
+    """Proceed/Cancel for the after-hours warning card. Sets flag, keeps gates."""
+    from telegram.ext import ContextTypes as _CT  # noqa: F401 (type hint only)
+    query = update.callback_query
+    data = query.data if query else ""
+    if data == OFFHOURS_PROCEED:
+        context.user_data[OFFHOURS_FLAG] = True
+        await query.edit_message_text(
+            "\u23f3 Off-hours confirmed\u2026\nRe-send your command to proceed (labeled _(off-hours)_).",
+            parse_mode="Markdown")
+    else:
+        context.user_data.pop(OFFHOURS_FLAG, None)
+        await query.edit_message_text("\u2705 Cancelled \u2014 no changes made.",
+                                      parse_mode="Markdown")
+
+
+def get_offhours_handlers() -> list:
+    from telegram.ext import CallbackQueryHandler as _H
+    return [_H(handle_offhours_callback, pattern="^offhours_(proceed|cancel)$")]

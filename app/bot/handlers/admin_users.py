@@ -112,7 +112,7 @@ async def handle_approve_user_callback(update: Update, context: ContextTypes.DEF
         await context.bot.send_message(
             chat_id=int(target_chat_id),
             text=(
-                "Your request to use the Labor Report bot has been approved!\n\n"
+                f"Your request to use the Labor Report bot has been approved by {admin_chat_id}!\n\n"
                 "Use /start to begin."
             ),
         )
@@ -195,7 +195,8 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     auth.approve_user(target, chat_id)
-    await update.message.reply_text(f"User {target} approved. They can now use the bot.")
+    await update.message.reply_text(f"User {target} approved by {chat_id}. They can now use the bot.",
+                                    reply_to_message_id=update.message.message_id)
     logger.info("Admin %s approved user %s", chat_id, target)
 
     # Notify the approved user
@@ -203,7 +204,7 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await context.bot.send_message(
             chat_id=int(target),
             text=(
-                "Your request to use the Labor Report bot has been approved!\n\n"
+                f"Your request to use the Labor Report bot has been approved by {chat_id}!\n\n"
                 "Use /start to begin."
             ),
         )
@@ -240,7 +241,8 @@ async def reject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     auth.reject_user(target, chat_id)
-    await update.message.reply_text(f"User {target} rejected.")
+    await update.message.reply_text(f"User {target} rejected by {chat_id}.",
+                                    reply_to_message_id=update.message.message_id)
     logger.info("Admin %s rejected user %s", chat_id, target)
 
 
@@ -281,7 +283,8 @@ async def promote_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     auth.promote_to_admin(target, chat_id)
-    await update.message.reply_text(f"User {target} promoted to admin.")
+    await update.message.reply_text(f"User {target} promoted to admin by {chat_id}.",
+                                    reply_to_message_id=update.message.message_id)
     logger.info("Superadmin %s promoted user %s to admin", chat_id, target)
 
 
