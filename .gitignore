@@ -74,3 +74,10 @@ profile.md
 PROFILE.md
 *VISION*
 .vision/
+
+# Leftover audit - sidecars, rotated logs, generated exports
+database/*.db-shm
+database/*.db-wal
+logs/*.log.*
+exports/review/
+exports/template_previews/

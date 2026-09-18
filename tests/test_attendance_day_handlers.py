@@ -105,7 +105,7 @@ class TestMyDay:
         upd = make_update(111, "/myday")
         await att_handlers.myday_command(upd, ctx)
         out = upd.effective_message.reply_text.call_args[0][0]
-        assert "pending" in out and "missing_evidence" in out
+        assert "pending" in out and "missing\\_evidence" in out
         assert "absent" not in out
 
     async def test_pending_denied(self, services, flow_data):

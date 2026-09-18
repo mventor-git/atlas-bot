@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from telegram.ext import ContextTypes
 
+from app.bot.flood import guarded
+from app.bot.vendor_hermes import normalize_telegram_chat_id
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,10 +30,10 @@ async def notify(context: ContextTypes.DEFAULT_TYPE, ntype: str,
     outbox = _outbox(context)
     if outbox is None:
         try:
-            await context.bot.send_message(
-                chat_id=int(recipient),
+            await guarded(lambda: context.bot.send_message(
+                chat_id=normalize_telegram_chat_id(recipient),
                 text=_render(ntype, site_id, date, fields),
-                parse_mode="Markdown")
+                parse_mode="Markdown"))
         except Exception as e:
             logger.warning("Direct notify failed for %s: %s", recipient, e)
         return None
@@ -41,8 +43,9 @@ async def notify(context: ContextTypes.DEFAULT_TYPE, ntype: str,
     auth = (context.bot_data or {}).get("authorization_service")
 
     async def _send(to: str, text: str) -> None:
-        await context.bot.send_message(chat_id=int(to), text=text,
-                                       parse_mode="Markdown")
+        await guarded(lambda: context.bot.send_message(
+            chat_id=normalize_telegram_chat_id(to), text=text,
+            parse_mode="Markdown"))
 
     await outbox.dispatch(_send, auth=auth)
     return row

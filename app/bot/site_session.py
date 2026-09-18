@@ -26,6 +26,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
+from app.bot.vendor_hermes import normalize_telegram_chat_id
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +39,7 @@ def _auth(context: ContextTypes.DEFAULT_TYPE):
 
 
 def _chat_id(update: Update) -> str:
-    return str(update.effective_user.id)
+    return str(normalize_telegram_chat_id(update.effective_user.id))
 
 
 def resolve_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
