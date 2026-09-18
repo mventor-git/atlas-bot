@@ -136,7 +136,7 @@ class Styles:
     def clean(self):
         for holder in (self.doc.styles, self.doc.automaticstyles):
             for s in list(holder.getElementsByType(Style)):
-                if str(s.attributes.get("style:name", "")).startswith("a_"):
+                if str(s.getAttribute("name") or "").startswith("a_"):
                     holder.removeChild(s)
 
 
@@ -162,7 +162,8 @@ def classify(rows):
             header = i
         elif total is None and ("total" in low or "الإجمالي" in flat):
             total = i
-        if re.search(r"^(day|date|اليوم|التاريخ)[:：]", flat.strip()):
+        if re.search(r"^(day|date|اليوم|التاريخ)[:：]", flat.strip(),
+                       re.IGNORECASE):
             labels.append(i)
         if "automated report" in low or "تم الإنشاء بواسطة" in flat:
             hints.append(i)
@@ -269,6 +270,8 @@ def restyle_hr(path: Path):
     replaced = 0
     title_ts = s.text("hrtitle", color=INK, bold=True, size="14pt",
                       align="end" if rtl else "left")
+    BAND_TOKENS = ("approval", "routing", "اعتماد", "مسار")
+    HINT_TOKENS = ("generated", "keep with payroll", "الإنشاء", "الرواتب")
     for ri, r in enumerate(tab.getElementsByType(TableRow)):
         for c in cells(r):
             t = ots.cell_text(c)
@@ -282,13 +285,19 @@ def restyle_hr(path: Path):
             if "[" in t:
                 paint(c, s.label, s.value_t)     # [MARKER] value: tint
             elif t.endswith(":") or t.endswith(":"):
-                for p in c.getElementsByType(P):
-                    p.setAttribute("stylename", s.label_t)
+                paint(c, s.label, s.label_t)     # label: no fill (v2)
         if ri == 0:      # document title row
             for c in cells(r):
                 if (ots.cell_text(c) or "").strip():
-                    for p in c.getElementsByType(P):
-                        p.setAttribute("stylename", title_ts)
+                    paint(c, s.hero, title_ts)
+        else:
+            nonempty = [t for t in (ots.cell_text(c) for c in cells(r)) if t]
+            low = " ".join(nonempty).casefold()
+            if len(nonempty) == 1:
+                if any(t in low for t in BAND_TOKENS):
+                    paint_row(r, s, s.band, s.band_t)
+                elif any(t in low for t in HINT_TOKENS):
+                    paint_row(r, s, s.tint, s.hint)
     ots.save(doc, str(path))
     print("restyled(hr): %s (rules fixed: %d)" % (path.name, replaced))
 
