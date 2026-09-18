@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ t('hr') }}</h1><p>{{ t('site') }}: {{ site }}</p></div>
+<div class="cards">
+  <a class="card" href="{{ url_for('hr.queue') }}"><div class="num">{{ pending|length }}</div><div class="lbl">Pending Requests</div></a>
+  <a class="card" href="{{ url_for('hr.queue', status='pm_confirmed') }}"><div class="num">{{ reviews|length }}</div><div class="lbl">Pending Reviews</div></a>
+  <a class="card" href="{{ url_for('hr.grievances') }}"><div class="num">{{ grievances|length }}</div><div class="lbl">Open Grievances</div></a>
+  <a class="card" href="{{ url_for('hr.warnings') }}"><div class="num">{{ discipline|length }}</div><div class="lbl">Open Discipline Cases</div></a>
+  <div class="card"><div class="num">{% if att_queue is none %}?{% else %}{{ att_queue|length }}{% endif %}</div><div class="lbl">Attendance Exceptions (today)</div></div>
+  <div class="card"><div class="num">{% if runs is none %}?{% else %}{{ runs|length }}{% endif %}</div><div class="lbl">Payroll Runs (site)</div></div>
+</div>
+<h2 style="margin-block-start:24px">Recent HR Activity</h2>
+{% if recent %}
+<table class="grid"><tr><th>#</th><th>Type</th><th>{{ t('status') }}</th><th></th></tr>
+{% for c in recent %}
+<tr><td>{{ c.id }}</td><td>{{ c.case_type }}</td><td><span class="badge">{{ c.status }}</span></td>
+<td><a href="{{ url_for('hr.grievance_detail', case_id=c.id) }}">{{ t('details') }}</a></td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

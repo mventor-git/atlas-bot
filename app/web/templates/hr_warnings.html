@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Warnings / Discipline</h1><p>{{ t('site') }}: {{ site }}</p></div>
+<div class="notice">No standalone warnings domain exists yet — below are open <strong>discipline cases</strong> (filed vs decided are different operations). A filed case never deducts payroll; only an explicitly authorized money action does.</div>
+<h2>Filed (awaiting review)</h2>
+{% if filed %}
+<table class="grid"><tr><th>#</th><th>Subject</th><th>Filed by</th><th>Summary</th></tr>
+{% for c in filed %}<tr><td>{{ c.id }}</td><td>{{ c.subject_chat_id }}</td><td>{{ c.filed_by }}</td><td>{{ c.summary }}</td></tr>{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<h2>Decided / in appeal</h2>
+{% if decided %}
+<table class="grid"><tr><th>#</th><th>Subject</th><th>{{ t('status') }}</th><th>Decision</th></tr>
+{% for c in decided %}<tr><td>{{ c.id }}</td><td>{{ c.subject_chat_id }}</td><td><span class="badge">{{ c.status }}</span></td><td>{{ c.decision or '—' }}</td></tr>{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ t('dev') }}</h1><p>Read-first admin surface. Writes exist only where a safe backend op exists.</p></div>
+<div class="cards">
+  <a class="card" href="{{ url_for('dev.sites') }}"><div class="lbl">Sites</div></a>
+  <a class="card" href="{{ url_for('dev.users') }}"><div class="lbl">Users</div></a>
+  <a class="card" href="{{ url_for('dev.memberships') }}"><div class="lbl">Memberships</div></a>
+  <a class="card" href="{{ url_for('dev.capabilities') }}"><div class="lbl">Capabilities</div></a>
+  <a class="card" href="{{ url_for('dev.calendar') }}"><div class="lbl">Working Calendar</div></a>
+  <a class="card" href="{{ url_for('dev.templates') }}"><div class="lbl">Templates</div></a>
+  <a class="card" href="{{ url_for('dev.notify_rules') }}"><div class="lbl">Notification Rules</div></a>
+  <a class="card" href="{{ url_for('dev.payroll_policy') }}"><div class="lbl">Payroll Policies</div></a>
+  <a class="card" href="{{ url_for('dev.health') }}"><div class="lbl">System Health</div></a>
+  <a class="card" href="{{ url_for('dev.audit_view') }}"><div class="lbl">Audit</div></a>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Employees</h1><p>{{ t('site') }}: {{ site }}</p></div>
+<form class="filters" method="get">
+  <div><label>{{ t('search') }}</label><input name="q" value="{{ q }}"></div>
+  <div><label>{{ t('status') }}</label><select name="status" onchange="this.form.submit()">
+    <option value="">—</option>
+    {% for v in ['normal_user','viewer','hr','admin','project_manager','pending','rejected'] %}
+    <option value="{{ v }}" {{ 'selected' if f_status==v else '' }}>{{ v }}</option>
+    {% endfor %}</select></div>
+  <div><button class="btn ghost" type="submit">{{ t('search') }}</button></div>
+</form>
+{% if users %}
+<table class="grid"><tr><th>Name</th><th>Chat</th><th>Role</th><th>Membership</th>{% if show_salary %}<th>Salary</th>{% endif %}<th></th></tr>
+{% for u in users %}
+<tr><td>{{ u.first_name or u.username or '—' }}</td><td>{{ u.chat_id }}</td><td>{{ u.role }}</td>
+<td><span class="badge {{ 'ok' if memberships[u.chat_id].status=='active' else 'bad' }}">{{ memberships[u.chat_id].status }}</span></td>
+{% if show_salary %}<td>{{ u.monthly_salary or '—' }}</td>{% endif %}
+<td><a href="{{ url_for('hr.employee_detail', chat=u.chat_id) }}">{{ t('details') }}</a></td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

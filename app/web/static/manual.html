@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas HQ — Operator Manual</title>
+<style>
+:root{--paper:#FBFAF7;--strip:#F5F3EE;--ink:#1F1E1D;--stone:#6E6A60;--line:#D9D3C7;--coral:#D97757}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.65 "Segoe UI",Tahoma,Arial,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:28px;margin:0 0 4px}.sub{color:var(--stone);margin:0 0 24px}
+h2{font-size:18px;margin:30px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+h2 .n{display:inline-block;min-width:30px;height:30px;line-height:30px;text-align:center;border:1px solid var(--coral);color:var(--coral);border-radius:50%;font-size:14px;margin-inline-end:10px}
+p,li{max-width:70ch}code{background:var(--strip);border:1px solid var(--line);border-radius:3px;padding:0 5px;font-size:13px}
+.note{border-inline-start:3px solid var(--coral);background:var(--strip);padding:8px 14px;margin:12px 0}
+table{border-collapse:collapse;width:100%;margin:10px 0}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}th{color:var(--stone);font-size:12px;border-bottom:1px solid var(--ink)}
+.toc{columns:2;gap:32px;font-size:14px}.toc a{color:var(--ink)}
+@media print{.wrap{max-width:none;padding:0}a{color:#000;text-decoration:none}.noprint{display:none}h2{break-after:avoid}table{break-inside:avoid}}
+</style>
+</head>
+<body><div class="wrap">
+<p class="noprint"><a href="manual_ar.html">العربية ←</a></p>
+<h1>Atlas HQ — Operator Manual</h1>
+<p class="sub">Two surfaces, one Atlas: Telegram (operations) + HQ Web App (management). One identity, one capability model, one domain. Humans decide; the system records.</p>
+<div class="toc noprint">
+1 First launch · 2 Setup wizard order · 3 The two surfaces · 4 Identity &amp; access · 5 Sites · 6 Daily reports · 7 Approvals · 8 Attendance · 9 HR requests · 10 Grievances &amp; discipline · 11 Payroll · 12 Documents &amp; print · 13 Notifications · 14 Backup &amp; recovery · 15 Deliberate limits · 16 Troubleshooting
+</div>
+
+<h2><span class="n">1</span>First launch</h2>
+<ol>
+<li>Clone, create <code>.env</code>: <code>BOT_TOKEN</code>, <code>SUPERADMIN_CHAT_ID</code> (your Telegram id), <code>DATABASE_URL</code> empty = SQLite, <code>SITE_ID</code>.</li>
+<li><code>venv\Scripts\pip install -r requirements.txt</code> + install LibreOffice Still (soffice on PATH).</li>
+<li><code>venv\Scripts\python main.py --health</code> — config, templates, token, DB must all pass.</li>
+<li>Start the bot (host process, never a dev terminal for production). Open Telegram → <code>/start</code> → you are pending until approved.</li>
+<li>Web app: <code>venv\Scripts\python -m app.web.bootstrap --username hq --chat-id &lt;SUPERADMIN&gt;</code>, then run <code>webapp.py</code> and sign in. First screen is the <b>setup wizard</b>.</li>
+</ol>
+
+<h2><span class="n">2</span>The setup wizard — do this in order</h2>
+<p><b>1 · Start the site.</b> Pick the active site, confirm working calendar and confirmers. <b>2 · Read this manual</b> and tick “I have read the manual”. <b>3 · Work the checklist</b> — every item is recomputed from your data, so it can never lie. Guidance only: the system stays fully usable throughout.</p>
+
+<h2><span class="n">3</span>The two surfaces</h2>
+<table><tr><th>Telegram bot</th><th>HQ Web App</th></tr>
+<tr><td>Daily field work: reports, check-in, requests, approvals on the go</td><td>Review &amp; control: HR queue, case detail, employees, grievances, DEV config, audit, health</td></tr></table>
+<p class="note">Nothing is web-only or Telegram-only by accident: the domain services underneath are the same. Authorization is identical on both.</p>
+
+<h2><span class="n">4</span>Identity &amp; access</h2>
+<ul>
+<li>Everyone starts <b>pending</b>. A superadmin approves → <code>normal_user</code> + membership on their site(s).</li>
+<li>Authority = <b>membership + capabilities + site</b>. Roles (PM, HR, admin…) are labels that ship defaults; an explicit capability list <i>replaces</i> defaults, never adds.</li>
+<li><b>Separation of duties:</b> requester can never confirm/decide their own request; creator can never approve their own report. The service refuses even if a button is visible.</li>
+<li><b>OWNER</b> viewers see summaries only — never names, zones, details, or files.</li>
+<li>Web logins are linked 1:1 to the same Atlas user (Telegram id). No duplicate accounts.</li>
+</ul>
+
+<h2><span class="n">5</span>Sites &amp; active site</h2>
+<p>Site is the tenancy wall: every read default-denies cross-site, every write is stamped. Multi-site users switch the <b>active site</b> selector — switching never grants new authority; revoked sites simply disappear.</p>
+
+<h2><span class="n">6</span>Daily labor reports</h2>
+<p>Lifecycle: <code>draft → final → approved|rejected → locked</code>; rejected → draft (resubmit); locked → draft (admin unlock only). Finalize your draft, a reviewer approves (note required to reject), HQ/admin locks. Totals are computed, never typed. Contractor, zone, type come from the shared catalog.</p>
+
+<h2><span class="n">7</span>Approvals</h2>
+<p>Approve only what belongs to your active site and capability. Approval stamps who/when; rejection demands a note — the note <i>is</i> the clarification ask back to the creator.</p>
+
+<h2><span class="n">8</span>Attendance — evidence, not booleans</h2>
+<ul>
+<li>Check-in captures GPS + accuracy as <b>evidence</b>; verdicts (inside/outside/anomaly) derive from it. Never edit a verdict by hand — confirm, dispute, or mark exception with a note.</li>
+<li><b>Assisted check-in</b> names the real worker and the reason; it never auto-confirms — a confirmer owns the queue daily.</li>
+<li>Wrong day? File a <b>claim</b> (correction/note); a decider approves/denies it. Claims, not edits.</li>
+</ul>
+
+<h2><span class="n">9</span>HR requests</h2>
+<p>Types: advance, transport, leave, mission, overtime. Chain: <code>pending → PM confirm → HR decide → approved|rejected</code>. Approving an <b>advance</b> requires a deduction month (YYYY-MM). Approved money becomes append-only <b>payout/deduction events</b> with states derived from them (paid, partially_deducted, closed…); disputes are explicit and resolved on record. Reject always carries a note.</p>
+
+<h2><span class="n">10</span>Grievances &amp; discipline</h2>
+<p>Grievance: <code>filed → under review → resolved</code> (+ appeal by filer). Discipline: <code>filed → under review → decided</code> (+ appeal by subject; filer ≠ decider). A complaint is recorded, never auto-proven. <b>No case ever deducts payroll by itself</b> — money moves only through explicit money actions.</p>
+
+<h2><span class="n">11</span>Payroll</h2>
+<p>Runs consume <b>approved records only</b> under the active versioned policy (standard hours, OT multiplier, rounding, effective-from). Policy changes are append-only versions; past runs keep their snapshot. Corrections go through <b>adjustments on locked runs</b>, never silent edits. Explain any line to see its provenance.</p>
+
+<h2><span class="n">12</span>Documents &amp; print</h2>
+<p>Approved HR requests render bilingual PDF letters (EN/AR) from validated templates; the validator is authoritative. Printing is a host folder queue watched by the print watcher — drop, print, archive. Templates are filled, never edited by hand.</p>
+
+<h2><span class="n">13</span>Notifications</h2>
+<p>Workflow notices go through a durable outbox (deduplicated, retried with backoff). Confirm who holds <code>manage_payroll</code> per site — exception notices fan out to them. Watch the outbox pending count on the health page.</p>
+
+<h2><span class="n">14</span>Backup &amp; recovery</h2>
+<ol>
+<li><code>venv\Scripts\python scripts/backup_db.py</code> → integrity-checked snapshot, keeps newest 7.</li>
+<li>Schedule daily on the HQ box; copy off-box.</li>
+<li>Restore drill before trial: stop bot → swap DB → start → <code>/start</code> + one report view.</li>
+</ol>
+
+<h2><span class="n">15</span>Deliberate limits (honest, by design)</h2>
+<ul>
+<li>No warnings domain yet — discipline cases are shown labeled as such.</li>
+<li>No clarification state on HR — reject-with-note is the channel.</li>
+<li>Payroll policy is read-only in the web app until business sign-off.</li>
+<li>Rates, rounding, overtime rules, retention windows: open business questions, defaults are current values, not policy.</li>
+<li>Atlas Chat (when it lands) assists only — never a security authority.</li>
+</ul>
+
+<h2><span class="n">16</span>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Look at</th></tr>
+<tr><td>“Not allowed” everywhere</td><td>Membership active? Capability on this site? Pending role?</td></tr>
+<tr><td>Empty queues, data exists</td><td>Active site selector — you are looking at the wrong site.</td></tr>
+<tr><td>Cannot decide own request</td><td>Working as designed (SoD). Route to another reviewer.</td></tr>
+<tr><td>PDF buttons fail</td><td>soffice on PATH? Templates valid? (DEV → Templates)</td></tr>
+<tr><td>Bot silent</td><td>Outbox pending? Bot process running? Token valid?</td></tr>
+<tr><td>Numbers look wrong</td><td>Payroll consumes approved-only; check run snapshot vs current policy.</td></tr>
+</table>
+<p style="color:var(--stone)">Atlas HQ · internal operations manual · print me (Ctrl+P)</p>
+</div></body></html>

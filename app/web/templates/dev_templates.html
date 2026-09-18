@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Templates</h1><p>Validator is authoritative. No browser uploads.</p></div>
+<table class="grid"><tr><th>Path</th></tr>
+{% for p in paths %}<tr><td><code>{{ p }}</code></td></tr>{% endfor %}</table>
+{% if is_sa %}
+<form method="post" action="{{ url_for('dev.templates_validate') }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<p><button class="btn" type="submit">Run validation (slow, ~1 min)</button></p>
+</form>
+{% endif %}
+{% if result %}
+<h2>Last result</h2>
+<table class="grid"><tr><th>File</th><th>Result</th><th>Failures</th></tr>
+{% for r in result %}
+<tr><td><code>{{ r.file }}</code></td>
+<td><span class="badge {{ 'ok' if r.passed else 'bad' }}">{{ 'PASS' if r.passed else 'FAIL' }}</span></td>
+<td>{{ r.failures|join('; ') or '—' }}</td></tr>
+{% endfor %}</table>
+{% endif %}
+{% endblock %}

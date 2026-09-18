@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Memberships @ {{ site }}</h1><p>Effective access stays capability-based; roles are labels.</p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+<table class="grid"><tr><th>Chat</th><th>{{ t('status') }}</th><th>Capabilities</th>{% if is_sa %}<th>{{ t('actions') }}</th>{% endif %}</tr>
+{% for m in rows %}
+<tr><td>{{ m.chat_id }}</td><td><span class="badge {{ 'ok' if m.status=='active' else 'bad' }}">{{ m.status }}</span></td>
+<td>{% if m.capabilities %}{{ m.capabilities|join(', ') }}{% else %}role defaults{% endif %}</td>
+{% if is_sa %}<td>
+<form class="inline" method="post" action="{{ url_for('dev.membership_suspend') }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<input type="hidden" name="chat_id" value="{{ m.chat_id }}"><input type="hidden" name="site_id" value="{{ site }}">
+<button class="btn ghost" type="submit">Suspend</button></form>
+<form class="inline" method="post" action="{{ url_for('dev.membership_revoke') }}" data-confirm="Revoke membership?">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<input type="hidden" name="chat_id" value="{{ m.chat_id }}"><input type="hidden" name="site_id" value="{{ site }}">
+<button class="btn danger" type="submit">Revoke</button></form>
+</td>{% endif %}</tr>
+{% endfor %}</table>
+{% if is_sa %}
+<h2>Grant / update</h2>
+<form method="post" action="{{ url_for('dev.membership_grant') }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<label for="gchat">chat_id</label><input id="gchat" name="chat_id" required>
+<label for="gsite">site_id</label><input id="gsite" name="site_id" value="{{ site }}" required>
+<label for="gcaps">capabilities (comma names, empty = role defaults)</label>
+<input id="gcaps" name="capabilities" style="inline-size:100%">
+<p><button class="btn" type="submit">{{ t('save') }}</button></p>
+</form>
+{% endif %}
+{% endblock %}

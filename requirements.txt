@@ -20,6 +20,9 @@ pandas>=2.0,<3.0
 # Postgres (multi-site backend; SQLite is the local default)
 psycopg2-binary>=2.9,<3.0
 
+# HQ Web App (ticket-037; server-rendered, no JS framework)
+flask>=3.0,<4.0
+
 # Atlas opencode-serve agent (dep TBD, do not add yet)
 # opencode  # version TBD
 

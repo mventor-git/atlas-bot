@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>System Health</h1><p>Real checks only. Unknown is shown as unknown, never green.</p></div>
+<table class="grid"><tr><th>Check</th><th>Result</th><th>Detail</th></tr>
+{% for name, ok, detail in checks %}
+<tr><td>{{ name }}</td>
+<td>{% if ok is none %}<span class="badge">unknown</span>{% elif ok %}<span class="badge ok">OK</span>{% else %}<span class="badge bad">FAIL</span>{% endif %}</td>
+<td style="color:var(--stone)">{{ detail }}</td></tr>
+{% endfor %}</table>
+{% endblock %}

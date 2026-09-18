@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Payroll Policy @ {{ site }}</h1><p>{{ t('readonly') }} here. Values come from the versioned backend model — never hardcoded.</p></div>
+{% if policy_active %}
+<h2>Active ({{ policy_active.effective_from }}, v{{ policy_active.version }})</h2>
+<dl class="kv">
+  <dt>Standard hours</dt><dd>{{ policy_active.standard_hours }}</dd>
+  <dt>OT multiplier</dt><dd>{{ policy_active.ot_multiplier }}</dd>
+  <dt>Rounding</dt><dd>{{ policy_active.rounding }}</dd>
+  <dt>Hours basis</dt><dd>{{ policy_active.hours_basis }}</dd>
+  <dt>Set by</dt><dd>{{ policy_active.set_by }} @ {{ policy_active.set_at }}</dd>
+</dl>
+{% else %}<div class="empty">{{ t('no_data') }} (no active policy — runs would use system default snapshot)</div>{% endif %}
+<h2>History</h2>
+{% if history %}
+<table class="grid"><tr><th>v</th><th>Effective</th><th>Hours</th><th>OT×</th><th>Rounding</th><th>By</th></tr>
+{% for p in history %}
+<tr><td>{{ p.version }}</td><td>{{ p.effective_from }}</td><td>{{ p.standard_hours }}</td>
+<td>{{ p.ot_multiplier }}</td><td>{{ p.rounding }}</td><td>{{ p.set_by }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

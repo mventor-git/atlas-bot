@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Working Calendar @ {{ site }}</h1><p>Backend precedence is authoritative; this page only reflects it.</p></div>
+<dl class="kv">
+  <dt>Weekend days</dt><dd>{{ weekend }}</dd>
+  <dt>Today ({{ today }})</dt><dd>{{ probe[today] }}</dd>
+  <dt>Site overrides</dt><dd>{{ site_cfg }}</dd>
+</dl>
+<h2>Upcoming holidays (rest of year)</h2>
+{% if upcoming is none %}<div class="empty">Unavailable — check config.</div>
+{% elif upcoming %}<table class="grid"><tr><th>Date</th><th>Name</th></tr>
+{% for h in upcoming %}<tr><td>{{ h }}</td><td></td></tr>{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<p style="color:var(--stone)">Precedence: calendar-disabled → working_dates → off_dates → weekend → named holiday → required.</p>
+{% endblock %}

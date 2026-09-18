@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Users</h1></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+<p><a class="badge {{ 'accent' if f=='pending' else '' }}" href="{{ url_for('dev.users', f='pending') }}">pending</a>
+<a class="badge" href="{{ url_for('dev.users') }}">all</a></p>
+<table class="grid"><tr><th>Chat</th><th>Name</th><th>Role</th><th>Approved by</th>{% if is_sa %}<th>{{ t('actions') }}</th>{% endif %}</tr>
+{% for u in rows %}
+<tr><td>{{ u.chat_id }}</td><td>{{ u.first_name or u.username or '—' }}</td><td>{{ u.role }}</td><td>{{ u.approved_by or '—' }}</td>
+{% if is_sa %}<td>
+{% if u.role == 'pending' %}
+<form class="inline" method="post" action="{{ url_for('dev.user_approve', chat=u.chat_id) }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<button class="btn" type="submit">Approve</button></form>
+<form class="inline" method="post" action="{{ url_for('dev.user_reject', chat=u.chat_id) }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<button class="btn danger" type="submit">Reject</button></form>
+{% endif %}</td>{% endif %}</tr>
+{% endfor %}</table>
+{% endblock %}

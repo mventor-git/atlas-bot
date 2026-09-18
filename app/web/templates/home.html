@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ t('dashboard') }}</h1>
+  <p>{{ t('site') }}: {{ session.get('active_site', '—') }}</p>
+</div>
+<div class="cards">
+  {% for slug, label in nav %}
+  <a class="card" href="{{ module_url(slug) }}">
+    <div class="lbl">{{ label }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

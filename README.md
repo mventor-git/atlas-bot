@@ -12,7 +12,8 @@
 
 - **Docs: LibreOffice-native** - `.ots` templates filled with `odfpy`, PDFs rendered by headless `soffice`. Templates live in `templates/`, cell map in `config/config.yaml`. Templates are sacred: fill cells only. System requirement: LibreOffice Still + `soffice` on PATH.
 - **DB:** SQLite local (`database/atlas_bot.db`, gitignored) -> Postgres (multi-site isolation). `DATABASE_URL` in `.env`.
-- **Bot:** `python-telegram-bot` v21, Telegram-only UI. Python 3.12+.
+- **Bot:** `python-telegram-bot` v21, Telegram operational UI. Python 3.12+.
+- **HQ Web App:** Flask server-rendered management layer (`app/web/`, `webapp.py`). Same domain services, same capability model, same SQLite/Postgres DB. Run on the HQ host: `python -m app.web.bootstrap --username hq --chat-id <SUPERADMIN>` once, then `python webapp.py`. Additive: Telegram keeps working unchanged.
 
 ## Multi-site
 
@@ -53,7 +54,7 @@ docker compose logs -f bot
 
 ```
 atlas-bot/
-├── app/            # bot/config/database/libre/models/pdf/repositories/services/utils
+├── app/            # bot/config/database/libre/models/pdf/repositories/services/utils + web/
 ├── config/         # config.yaml (cell map) + egypt_holidays.json
 ├── templates/      # sacred .ots templates (small/medium/large/empty-day/contractor_report)
 ├── database/       # tables.ods skeleton tracked; .db gitignored; Postgres target

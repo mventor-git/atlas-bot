@@ -1,4 +1,4 @@
-﻿"""
+"""
 Configuration models for Labor-Report.
 
 Uses Pydantic BaseModel for validation and type safety.
@@ -274,7 +274,11 @@ class AppConfig(BaseModel):
 
     @property
     def super_admin_chat_id(self) -> str:
-        """Get the super admin Telegram chat ID from config."""
+        """Get the super admin Telegram chat ID from env or config."""
+        import os
+        env_val = os.getenv("SUPERADMIN_CHAT_ID")
+        if env_val and env_val.strip() and env_val.strip() != "0000000000":
+            return env_val.strip()
         value = self.auth.get("superadmin")
         if value is None:
             logger.warning("No superadmin configured in auth.superadmin")

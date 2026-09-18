@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Notification Rules</h1><p>{{ t('readonly') }} config snapshot. Pending @ site: {{ pending if pending is not none else '?' }}</p></div>
+<table class="grid"><tr><th>Key</th><th>Value</th></tr>
+{% for k,v in rules.items() %}<tr><td><code>{{ k }}</code></td><td>{{ v }}</td></tr>{% endfor %}</table>
+{% endblock %}

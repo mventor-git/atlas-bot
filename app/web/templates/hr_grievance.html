@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Case #{{ case.id }} — {{ case.case_type }}</h1>
+<p><span class="badge">{{ case.status }}</span></p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+<div class="notice">A complaint is recorded, never auto-proven. No payroll or disciplinary consequence follows from this screen.</div>
+<h2>Summary</h2>
+<dl class="kv">
+  <dt>Submitted by</dt><dd>{{ case.reporter_chat_id }}{% if reporter %} ({{ reporter.first_name or reporter.username }}){% endif %}</dd>
+  <dt>{{ t('site') }}</dt><dd>{{ case.site_id }}</dd>
+  <dt>Date</dt><dd>{{ case.created_at }}</dd>
+  <dt>Complaint</dt><dd>{{ case.summary }}</dd>
+</dl>
+<h2>Evidence</h2>
+<div class="empty">Attachments ride the Telegram thread; link evidence by reference here (planned).</div>
+<h2>Review timeline</h2>
+<dl class="kv">
+  <dt>Reviewed by</dt><dd>{{ case.reviewed_by or '—' }}</dd>
+  <dt>Resolved by</dt><dd>{{ case.resolved_by or '—' }}</dd>
+  <dt>Decision</dt><dd>{{ case.resolution_note or '—' }}</dd>
+  <dt>Resolved at</dt><dd>{{ case.resolved_at or '—' }}</dd>
+</dl>
+<h2>Decision</h2>
+{% if case.status in ('filed','appealed') and can_review %}
+<form method="post" action="{{ url_for('hr.grievance_review', case_id=case.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <button class="btn" type="submit">Start review</button>
+</form>
+{% endif %}
+{% if case.status == 'under_review' and can_resolve %}
+<form method="post" action="{{ url_for('hr.grievance_resolve', case_id=case.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label for="rn">Resolution note (required)</label>
+  <input id="rn" name="note" style="inline-size:100%">
+  <p><button class="btn" type="submit">Resolve</button></p>
+</form>
+{% endif %}
+<h2>Audit</h2>
+<div class="empty">Case state changes land here via the audit viewer (DEV).</div>
+<p><a href="{{ url_for('hr.grievances') }}">← {{ t('back') }}</a></p>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Sites</h1><p>Tenancy source: config. Creation/editing: planned, never for site users.</p></div>
+<table class="grid"><tr><th>ID</th><th>Members</th><th>Outbox pending</th><th>Config</th></tr>
+{% for r in rows %}
+<tr><td><span class="badge accent">{{ r.id }}</span></td><td>{{ r.members if r.members is not none else '?' }}</td>
+<td>{{ r.outbox_pending if r.outbox_pending is not none else '?' }}</td>
+<td style="color:var(--stone)">{{ r.raw }}</td></tr>
+{% endfor %}</table>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Audit @ {{ site }}</h1><p>{{ t('readonly') }}. Site-scoped.</p></div>
+<form class="filters" method="get">
+  <div><label>Actor (chat_id)</label><input name="actor" value="{{ f_actor }}"></div>
+  <div><label>Action</label><input name="action" value="{{ f_action }}"></div>
+  <div><button class="btn ghost" type="submit">{{ t('search') }}</button></div>
+</form>
+<h2>Event log</h2>
+{% if rows %}
+<table class="grid"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object</th><th>Old → New</th></tr>
+{% for e in rows %}
+<tr><td>{{ e.timestamp }}</td><td>{{ e.telegram_user }}</td><td>{{ e.action }}</td>
+<td>{{ e.object_type }}/{{ e.object_id or e.object_date }}</td>
+<td>{{ e.old_value or '' }} → {{ e.new_value or '' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<h2>User activity</h2>
+{% if activity %}
+<table class="grid"><tr><th>Time</th><th>User</th><th>Action</th><th>Report</th></tr>
+{% for a in activity %}
+<tr><td>{{ a.timestamp }}</td><td>{{ a.telegram_user }}</td><td>{{ a.action }}</td><td>{{ a.report_date or '' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

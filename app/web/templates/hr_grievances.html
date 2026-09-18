@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Grievances</h1><p>{{ t('site') }}: {{ site }}</p></div>
+<p>
+{% for k,v in counts.items() %}
+<a class="badge {{ 'accent' if status==k else '' }}" href="{{ url_for('hr.grievances', status=k) }}">{{ k }}: {{ v }}</a>
+{% endfor %} <a class="badge" href="{{ url_for('hr.grievances') }}">all</a>
+</p>
+{% if rows %}
+<table class="grid"><tr><th>#</th><th>Type</th><th>By</th><th>{{ t('status') }}</th><th></th></tr>
+{% for c in rows %}
+<tr><td>{{ c.id }}</td><td>{{ c.case_type }}</td><td>{{ c.reporter_chat_id }}</td>
+<td><span class="badge">{{ c.status }}</span></td>
+<td><a href="{{ url_for('hr.grievance_detail', case_id=c.id) }}">{{ t('details') }}</a></td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ dir }}" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ t('login') }} — {{ t('app_name') }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <h1>{{ t('app_name') }}</h1>
+  <p style="color:var(--stone)">HQ Operations — {{ t('login') }}</p>
+  {% if error %}<div class="flash">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ url_for('auth.login_post') }}">
+    <input type="hidden" name="next" value="{{ next|default('/') }}">
+    <label for="u">{{ t('username') }}</label>
+    <input id="u" name="username" autocomplete="username" required autofocus>
+    <label for="p">{{ t('password') }}</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <p><button class="btn" type="submit">{{ t('login') }}</button></p>
+  </form>
+  <form method="post" action="{{ url_for('auth.prefs') }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <select name="lang" onchange="this.form.submit()">
+      <option value="en" {{ 'selected' if lang=='en' else '' }}>EN</option>
+      <option value="ar" {{ 'selected' if lang=='ar' else '' }}>عربي</option>
+    </select>
+  </form>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Request #{{ req.id }} — {{ req.request_type }}</h1>
+<p><span class="badge {{ 'ok' if req.status=='approved' else 'bad' if req.status=='rejected' else 'warn' }}">{{ req.status }}</span></p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+<h2>Summary</h2>
+<dl class="kv">
+  <dt>Requester</dt><dd>{{ req.requester_name }} ({{ req.requester_chat_id }})</dd>
+  <dt>{{ t('site') }}</dt><dd>{{ req.site_id }}</dd>
+  <dt>Amount</dt><dd>{{ req.amount }}</dd>
+  <dt>Reason</dt><dd>{{ req.reason }}</dd>
+  {% if req.trip_date %}<dt>Trip date</dt><dd>{{ req.trip_date }}</dd>{% endif %}
+  {% if req.report_ref %}<dt>Report ref</dt><dd>{{ req.report_ref }}</dd>{% endif %}
+  {% if req.start_date %}<dt>Period</dt><dd>{{ req.start_date }} → {{ req.end_date }}</dd>{% endif %}
+  {% if req.hours %}<dt>Hours</dt><dd>{{ req.hours }}</dd>{% endif %}
+  {% if req.deduction_month %}<dt>Deduction month</dt><dd>{{ req.deduction_month }}</dd>{% endif %}
+  {% if req.note %}<dt>Note</dt><dd>{{ req.note }}</dd>{% endif %}
+  <dt>Created</dt><dd>{{ req.created_at }}</dd>
+</dl>
+<h2>Requester</h2>
+{% if requester %}<dl class="kv"><dt>Name</dt><dd>{{ requester.first_name }} ({{ requester.username }})</dd>
+<dt>Role</dt><dd>{{ requester.role }}</dd></dl>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<h2>Evidence</h2>
+<dl class="kv">
+  <dt>Receipt</dt><dd>{{ req.receipt_path or '—' }}</dd>
+  <dt>PDF</dt><dd>{{ req.pdf_path or '—' }}</dd>
+  {% if money %}<dt>Money state</dt><dd>{{ money }}</dd>{% endif %}
+</dl>
+<h2>Timeline</h2>
+{% if req.signatures %}<ul class="timeline">
+{% for s in req.signatures %}<li><strong>{{ s.decision }}</strong> — {{ s.name }} ({{ s.role }})
+<span class="when">{{ s.at }}{% if s.note %} · {{ s.note }}{% endif %}</span></li>{% endfor %}</ul>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<h2>Decision</h2>
+{% if req.status == 'pending' and can_confirm %}
+<form method="post" action="{{ url_for('hr.confirm', req_id=req.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <button class="btn" type="submit">{{ t('confirm') }} (PM)</button>
+</form>
+{% endif %}
+{% if req.status in ('pending','pm_confirmed') and can_decide %}
+<form method="post" action="{{ url_for('hr.decide', req_id=req.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label for="note">Note (required to reject — it is the clarification ask)</label>
+  <input id="note" name="note" style="inline-size:100%">
+  {% if req.request_type == 'advance' %}
+  <label for="mm">Deduction month YYYY-MM (required to approve advances)</label>
+  <input id="mm" name="deduction_month" placeholder="2026-10">
+  {% endif %}
+  <p><button class="btn" type="submit" name="decision" value="approve">{{ t('approve') }}</button>
+  <button class="btn danger" type="submit" name="decision" value="reject">{{ t('reject') }}</button></p>
+</form>
+{% elif req.status not in ('approved','rejected') %}
+<p style="color:var(--stone)">No decision action available to you on this request.</p>
+{% endif %}
+<p><a href="{{ url_for('hr.queue') }}">← {{ t('back') }}</a></p>
+{% endblock %}

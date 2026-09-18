@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ dir }}" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title|default(t('app_name')) }} — {{ t('app_name') }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">{{ t('app_name') }}<small>HQ Operations</small></div>
+    <nav class="nav" aria-label="modules">
+      <a href="{{ module_url('setup') }}" class="{{ 'active' if active=='setup' else '' }}">✦ Setup</a>
+      {% for title, slugs in sections %}
+      <div class="nav-sec" data-sec="{{ title }}">
+        <button type="button" class="nav-sec-h" aria-expanded="true">{{ title }} <span>▸</span></button>
+        <div class="nav-sec-b">
+        {% for slug in slugs %}
+          <a href="{{ module_url(slug) }}" class="{{ 'active' if active==slug else '' }}">{{ slug_label(slug) }}</a>
+        {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">{{ session.get('web_user', '') }}</div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="btn ghost menu-toggle" id="menu-toggle" aria-label="menu">☰</button>
+      {% if g.chat_id and g.sites|length > 1 %}
+      <form class="inline" method="post" action="{{ url_for('auth.switch_site') }}">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <label class="sr" for="sitepick">{{ t('site') }}</label>
+        <select id="sitepick" name="site_id" onchange="this.form.submit()">
+          {% for s in g.sites %}
+          <option value="{{ s }}" {{ 'selected' if s == session.get('active_site') else '' }}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% elif g.chat_id and g.sites|length == 1 %}
+      <span class="badge">{{ g.sites[0] }}</span>
+      {% endif %}
+      <span class="spacer"></span>
+      <form class="inline" method="post" action="{{ url_for('auth.prefs') }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <label class="sr" for="langpick">lang</label>
+        <select id="langpick" name="lang" onchange="this.form.submit()">
+          <option value="en" {{ 'selected' if lang=='en' else '' }}>EN</option>
+          <option value="ar" {{ 'selected' if lang=='ar' else '' }}>عربي</option>
+        </select>
+        <label class="sr" for="themepick">theme</label>
+        <select id="themepick" name="theme" onchange="this.form.submit()">
+          <option value="system" {{ 'selected' if theme=='system' else '' }}>◐</option>
+          <option value="light" {{ 'selected' if theme=='light' else '' }}>☀</option>
+          <option value="dark" {{ 'selected' if theme=='dark' else '' }}>☾</option>
+        </select>
+      </form>
+      {% if g.chat_id %}
+      <form class="inline" method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+        <button class="btn ghost" type="submit">{{ t('logout') }}</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="content">
+      {% if setup_banner %}
+      <div class="notice" id="setup-banner" role="status">
+        This install is intentionally empty — {{ setup_remaining }} core setup step(s) left.
+        <a href="{{ module_url('setup') }}">Open setup</a>
+        <button type="button" id="setup-banner-x" aria-label="Dismiss" style="float:inline-end">✕</button>
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

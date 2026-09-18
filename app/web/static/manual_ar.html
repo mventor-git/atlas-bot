@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>أطلس — دليل التشغيل</title>
+<style>
+:root{--paper:#FBFAF7;--strip:#F5F3EE;--ink:#1F1E1D;--stone:#6E6A60;--line:#D9D3C7;--coral:#D97757}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.8 Tahoma,Arial,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:28px;margin:0 0 4px}.sub{color:var(--stone);margin:0 0 24px}
+h2{font-size:18px;margin:30px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+h2 .n{display:inline-block;min-width:30px;height:30px;line-height:30px;text-align:center;border:1px solid var(--coral);color:var(--coral);border-radius:50%;font-size:14px;margin-inline-end:10px}
+p,li{max-width:70ch}code{background:var(--strip);border:1px solid var(--line);border-radius:3px;padding:0 5px;font-size:13px;direction:ltr;display:inline-block}
+.note{border-inline-start:3px solid var(--coral);background:var(--strip);padding:8px 14px;margin:12px 0}
+table{border-collapse:collapse;width:100%;margin:10px 0}th,td{text-align:start;padding:6px 10px;border-bottom:1px solid var(--line)}th{color:var(--stone);font-size:12px;border-bottom:1px solid var(--ink)}
+@media print{.wrap{max-width:none;padding:0}a{color:#000;text-decoration:none}.noprint{display:none}h2{break-after:avoid}table{break-inside:avoid}}
+</style>
+</head>
+<body><div class="wrap">
+<p class="noprint"><a href="manual.html">→ English</a></p>
+<h1>أطلس — دليل التشغيل</h1>
+<p class="sub">واجهتان ونظام واحد: تيليجرام (التشغيل) + تطبيق الإدارة (الويب). هوية واحدة، وصلاحيات واحدة، ونطاق واحد. الإنسان يقرر، والنظام يوثّق.</p>
+
+<h2><span class="n">1</span>التشغيل الأول</h2>
+<ol>
+<li>انسخ المشروع وأنشئ <code>.env</code>: <code>BOT_TOKEN</code> و<code>SUPERADMIN_CHAT_ID</code> (رقم تيليجرام الخاص بك) و<code>DATABASE_URL</code> فارغ = SQLite و<code>SITE_ID</code>.</li>
+<li><code>venv\Scripts\pip install -r requirements.txt</code> + ثبّت LibreOffice Still (soffice في PATH).</li>
+<li><code>venv\Scripts\python main.py --health</code> — يجب أن تنجح كل الفحوص.</li>
+<li>شغّل البوت (عملية على جهاز المقر، لا طرفية مطوّر للإنتاج). افتح تيليجرام ← <code>/start</code> ← ستبقى معلّقاً حتى الاعتماد.</li>
+<li>الويب: <code>venv\Scripts\python -m app.web.bootstrap --username hq --chat-id &lt;SUPERADMIN&gt;</code> ثم شغّل <code>webapp.py</code> وسجّل الدخول. أول شاشة هي <b>معالج الإعداد</b>.</li>
+</ol>
+
+<h2><span class="n">2</span>معالج الإعداد — بهذا الترتيب</h2>
+<p><b>1 · ابدأ الموقع.</b> اختر الموقع النشط وتأكد من التقويم والمعتمدين. <b>2 · اقرأ هذا الدليل</b> وعلّم «قرأت الدليل». <b>3 · اعمل على القائمة</b> — كل بند يُحسب من بياناتك فلا يمكن أن يكذب. إرشاد فقط: النظام يبقى usable تماماً طوال الوقت.</p>
+
+<h2><span class="n">3</span>الواجهتان</h2>
+<table><tr><th>بوت تيليجرام</th><th>تطبيق الويب</th></tr>
+<tr><td>العمل الميداني: التقارير والحضور والطلبات والاعتمادات</td><td>المراجعة والضبط: طابور HR وتفاصيل القضايا والموظفين والتظلمات وإعدادات DEV والتدقيق والصحة</td></tr></table>
+<p class="note">لا شيء حصري لإحدى الواجهتين بالمصادفة: الخدمات تحتهما واحدة، والصلاحيات متطابقة.</p>
+
+<h2><span class="n">4</span>الهوية والصلاحيات</h2>
+<ul>
+<li>الجميع يبدأ <b>معلّقاً (pending)</b>. المدير العام يعتمد ← مستخدم عادي + عضوية في مواقعه.</li>
+<li>الصلاحية = <b>عضوية + قدرات + موقع</b>. الأدوار (PM/HR/…) تسميات بقيم افتراضية؛ وقائمة القدرات الصريحة <i>تستبدل</i> الافتراضي ولا تُضاف إليه.</li>
+<li><b>الفصل بين المهام:</b> مقدّم الطلب لا يعتمد طلبه ولا يبتّ فيه أبداً؛ ومنشئ التقرير لا يعتمده. الخدمة ترفض حتى لو ظهر الزر.</li>
+<li>مشاهد <b>OWNER</b> يرى الملخصات فقط — لا أسماء ولا تفاصيل ولا ملفات.</li>
+<li>حساب الويب مرتبط 1:1 بنفس مستخدم أطلس (رقم تيليجرام). لا حسابات مكررة.</li>
+</ul>
+
+<h2><span class="n">5</span>المواقع والموقع النشط</h2>
+<p>الموقع هو حدّ العزل: كل قراءة ترفض افتراضياً خارج الموقع، وكل كتابة مختومة بالموقع. التبديل بين المواقع لا يمنح صلاحيات جديدة؛ والمواقع المسحوبة تختفي ببساطة.</p>
+
+<h2><span class="n">6</span>تقارير العمالة اليومية</h2>
+<p>الدورة: <code>draft ← final ← approved|rejected ← locked</code>؛ والمرفوض يعود مسودة، والمقفل لا يفتحه إلا الإدارة. اعتمد مسودتك، والمراجع يعتمد (الرفض يتطلب ملاحظة)، والمقر يقفل. الإجماليات محسوبة لا مكتوبة.</p>
+
+<h2><span class="n">7</span>الاعتمادات</h2>
+<p>اعتمد فقط ما يخص موقعك النشط وصلاحيتك. الاعتماد يختم من ومتى؛ والرفض يتطلب ملاحظة — والملاحظة <i>هي</i> طلب التوضيح لصاحب التقرير.</p>
+
+<h2><span class="n">8</span>الحضور — أدلة لا قيم منطقية</h2>
+<ul>
+<li>تسجيل الدخول يلتقط GPS والدقة <b>كدليل</b>؛ والأحكام (داخل/خارج/شاذ) تُشتق منه. لا تعدّل حكماً بيدك — أكّد أو اعترض أو علّم استثناءً مع ملاحظة.</li>
+<li><b>التسجيل المساعَد</b> يسمّي العامل الحقيقي والسبب؛ ولا يُعتمد تلقائياً أبداً — المعتمِد يملك الطابور يومياً.</li>
+<li>يوم خطأ؟ ارفع <b>مطالبة</b> (تصحيح/ملاحظة)؛ والبتّ بقبولها أو رفضها. مطالبات لا تعديلات.</li>
+</ul>
+
+<h2><span class="n">9</span>طلبات HR</h2>
+<p>الأنواع: سلفة ومواصلات وإجازة ومهمة وإضافي. السلسلة: <code>pending ← تأكيد PM ← بتّ HR ← approved|rejected</code>. اعتماد <b>السلفة</b> يتطلب شهر الخصم (YYYY-MM). الأموال المعتمدة تصبح أحداث <b>صرف/خصم</b> غير قابلة للتعديل وحالاتها مشتقة (مدفوع، مخصوم جزئياً، مغلق…)؛ والنزاعات صريحة وتُحلّ في السجل. الرفض يحمل ملاحظة دائماً.</p>
+
+<h2><span class="n">10</span>التظلمات والجزاءات</h2>
+<p>التظلم: <code>filed ← under review ← resolved</code> (+ استئناف من المقدّم). الجزاء: <code>filed ← under review ← decided</code> (+ استئناف من المعني؛ ومقدّم البلاغ ≠ الباتّ). الشكوى تُسجَّل ولا تُثبَت تلقائياً. <b>لا قضية تخصم من الرواتب بنفسها</b> — الأموال تتحرك بإجراءات مالية صريحة فقط.</p>
+
+<h2><span class="n">11</span>الرواتب</h2>
+<p>التشغيلات تستهلك <b>السجلات المعتمدة فقط</b> تحت سياسة مُصدَرة (الساعات المعيارية ومضاعف الإضافي والتقريب والسريان). تغييرات السياسة إصدارات متراكمة؛ والتشغيلات القديمة تحتفظ بلقطتها. التصحيح عبر <b>تسويات على التشغيلات المقفلة</b> لا تعديلات صامتة. واشرح أي سطر لترى مصدره.</p>
+
+<h2><span class="n">12</span>المستندات والطباعة</h2>
+<p>الطلبات المعتمدة تُخرج خطابات PDF ثنائية (EN/AR) من قوالب مُتحقق منها؛ والمُتحقق هو المرجع. الطباعة طابور مجلدات على جهاز المقر يراقبه مراقب الطباعة — أسقط واطبع وأرشف. القوالب تُملأ ولا تُعدَّل باليد.</p>
+
+<h2><span class="n">13</span>الإشعارات</h2>
+<p>إشعارات سير العمل تمر بصندوق صادر دائم (منع تكرار + إعادة بمعدل). تأكد من حاملي <code>manage_payroll</code> لكل موقع — إشعارات الاستثناء تتجه إليهم. راقب عدّاد المعلق في صفحة الصحة.</p>
+
+<h2><span class="n">14</span>النسخ الاحتياطي والاسترداد</h2>
+<ol>
+<li><code>venv\Scripts\python scripts/backup_db.py</code> ← لقطة مفحوصة تحتفظ بأحدث 7.</li>
+<li>جدولها يومياً على جهاز المقر؛ وانسخ خارج الجهاز.</li>
+<li>تمرين الاسترداد قبل التجربة: أوقف البوت ← بدّل القاعدة ← شغّل ← <code>/start</code> + عرض تقرير.</li>
+</ol>
+
+<h2><span class="n">15</span>حدود مقصودة (بصدق، بالتصميم)</h2>
+<ul>
+<li>لا نطاق إنذارات مستقل بعد — قضايا الجزاءات تُعرض مسماة كما هي.</li>
+<li>لا حالة توضيح على HR — الرفض مع ملاحظة هو القناة.</li>
+<li>سياسة الرواتب للقراءة فقط في الويب حتى الاعتماد التجاري.</li>
+<li>المعدلات والتقريب وقواعد الإضافي ومدد الاحتفاظ: أسئلة تجارية مفتوحة، والقيم الحالية قيم تشغيل لا سياسة.</li>
+<li>محادثة أطلس (عندما تأتي) مساعِدة فقط — ليست مرجع صلاحيات أبداً.</li>
+</ul>
+
+<h2><span class="n">16</span>استكشاف الأعطال</h2>
+<table>
+<tr><th>العرض</th><th>انظر إلى</th></tr>
+<tr><td>«غير مسموح» في كل مكان</td><td>العضوية نشطة؟ القدرة على هذا الموقع؟ الدور معلّق؟</td></tr>
+<tr><td>طوابير فارغة وبيانات موجودة</td><td>محدد الموقع النشط — تنظر إلى الموقع الخطأ.</td></tr>
+<tr><td>لا أستطيع البتّ في طلبي</td><td>يعمل كما صُمم (الفصل). وجّه لمراجع آخر.</td></tr>
+<tr><td>أزرار PDF تفشل</td><td>soffice في PATH؟ القوالب صالحة؟ (DEV ← القوالب)</td></tr>
+<tr><td>البوت صامت</td><td>المعلق في الصادر؟ عملية البوت تعمل؟ التوكن صالح؟</td></tr>
+<tr><td>أرقام تبدو خطأ</td><td>الرواتب تستهلك المعتمد فقط؛ قارن لقطة التشغيل بالسياسة الحالية.</td></tr>
+</table>
+<p style="color:var(--stone)">أطلس · دليل التشغيل الداخلي · اطبعني (Ctrl+P)</p>
+</div></body></html>

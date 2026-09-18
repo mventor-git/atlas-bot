@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ user.first_name or user.username or user.chat_id }}</h1></div>
+<dl class="kv">
+  <dt>Chat</dt><dd>{{ user.chat_id }}</dd>
+  <dt>Role (label)</dt><dd>{{ user.role }}</dd>
+  <dt>Membership @ {{ site }}</dt><dd>{{ mem.status }}</dd>
+  <dt>Capabilities @ {{ site }}</dt><dd>{% if mem.capabilities %}{{ mem.capabilities|join(', ') }}{% else %}role defaults{% endif %}</dd>
+  {% if show_salary %}<dt>Salary cache</dt><dd>{{ user.monthly_salary or '—' }} (truth: salary history)</dd>{% endif %}
+</dl>
+<h2>All memberships</h2>
+<table class="grid"><tr><th>{{ t('site') }}</th><th>{{ t('status') }}</th><th>Capabilities</th></tr>
+{% for m in all_memberships %}
+<tr><td>{{ m.site_id }}</td><td><span class="badge">{{ m.status }}</span></td>
+<td>{% if m.capabilities %}{{ m.capabilities|join(', ') }}{% else %}role defaults{% endif %}</td></tr>
+{% endfor %}</table>
+<p><a href="{{ url_for('hr.employees') }}">← {{ t('back') }}</a></p>
+{% endblock %}

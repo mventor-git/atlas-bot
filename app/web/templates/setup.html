@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Setup wizard</h1>
+<p>This install ships intentionally empty. Start the site, read the manual, work the checklist — leave and return any time.</p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+<p><span class="badge {{ 'ok' if status.setup_complete else 'warn' }}">
+Core {{ status.core_done }} / {{ status.core_total }}</span>
+<span class="badge">Memberships: {{ status.counts.memberships }}</span>
+<span class="badge">Pending HR: {{ status.counts.pending_requests }}</span></p>
+
+<h2>1 · Start the site</h2>
+<form method="post" action="{{ url_for('auth.switch_site') }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<input type="hidden" name="next" value="{{ url_for('setup.wizard') }}">
+{% for s in sites %}
+<label style="display:inline-block;margin-inline-end:12px">
+<input type="radio" name="site_id" value="{{ s }}" {{ 'checked' if s==current else '' }}> {{ s }}</label>
+{% endfor %}
+<p><button class="btn" type="submit">Set active site</button></p>
+</form>
+
+<h2>2 · Read the operator manual</h2>
+<p style="color:var(--stone)">The full path from install to daily business — one printable page.</p>
+<p>
+<a class="btn ghost" href="{{ url_for('static', filename='manual.html') }}" target="_blank" rel="noopener">Open the manual (EN) →</a>
+<a class="btn ghost" href="{{ url_for('static', filename='manual_ar.html') }}" target="_blank" rel="noopener">الدليل (AR) →</a>
+</p>
+<form method="post" action="{{ url_for('setup.ack') }}">
+<input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+<label style="display:inline-block"><input type="checkbox" name="ack" value="1" {{ 'checked' if ack else '' }} onchange="this.form.submit()"> I have read the manual</label>
+</form>
+
+<h2>3 · Work through the checklist</h2>
+{% for group, items in [('Core — required first', status['items']|selectattr('core')|list), ('Next — what a real site loads in', status['items']|rejectattr('core')|list)] %}
+<h3>{{ group }}</h3>
+<ul class="timeline">
+{% for it in items %}
+<li><span class="badge {{ 'ok' if it.done else 'warn' }}">{{ '✓' if it.done else '•' }}</span>
+<strong>{{ it.label }}</strong> <span style="color:var(--stone)">{{ it.hint }}</span>
+<a class="drawer-link" href="{{ it.link }}">{{ 'Open' if it.done else 'Go' }} →</a></li>
+{% endfor %}
+</ul>
+{% endfor %}
+{% if status.setup_complete %}
+<div class="notice"><b>Core setup finished.</b> Approve users, run the daily report cycle, confirm attendance evidence, decide HR requests — and read the truth in Audit.</div>
+{% endif %}
+<p style="color:var(--stone)">Nothing here is a flag: leaving, restarting, or a fresh-start reset keeps exactly the same honest picture — recomputed from your data every load.</p>
+{% endblock %}
