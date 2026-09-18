@@ -78,13 +78,16 @@ def _texts(path: Path):
 
 class TestDailyFill:
     def test_markers_items_totals(self, config, temp_dir: Path):
-        out = Path(TemplateFiller(config).fill(_report(2), str(temp_dir / "r.ods")))
+        out = Path(TemplateFiller(config).fill(_report(2), str(temp_dir / "r.ods"), use_v3=False))
         assert out.exists()
         grid = _texts(out)
         flat = " | ".join(" ".join(r) for r in grid)
         assert "Monday" in flat and "2026-09-08" in flat
         assert "Co 0" in flat and "Co 1" in flat
-        assert "3" in grid[13][5] or "3" in " ".join(grid[13])
+        # Totals row found by content: repeated slot rows are expanded at
+        # fill time, so its index shifts with template capacity.
+        (tot,) = [r for r in grid if "Total" in " ".join(r)]
+        assert "3" in tot[5] or "3" in " ".join(tot)
 
     def test_overflow_clones_rows(self, config, temp_dir: Path):
         out = Path(TemplateFiller(config).fill(_report(6), str(temp_dir / "r.ods")))
@@ -99,13 +102,36 @@ class TestDailyFill:
         out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "e.ods")))
         assert out.exists()
 
+    def test_repeated_rows_expanded_before_write(self, config,
+                                                 temp_dir: Path):
+        """P0: filling a number-rows-repeated row must not multiply it
+        at render time (LibreOffice repeats the element Nx)."""
+        import re as _re
+        import zipfile
+
+        cfg = _force_template(
+            config, "small", "templates/contractor-daily-labor-template.ods")
+        out = Path(TemplateFiller(cfg).fill(_report(2),
+                                            str(temp_dir / "r.ods"), use_v3=False))
+        content = zipfile.ZipFile(out).read("content.xml").decode("utf8")
+        pat = (r"<table:table-row[^>]*number-rows-repeated=\"(\d+)\"[^>]*>"
+               r"(.*?)</table:table-row>")
+        for reps, body in _re.findall(pat, content, _re.S):
+            text = _re.sub(r"<[^>]+>", "", body).strip()
+            assert not text, (
+                f"repeated x{reps} row carries text (renders Nx): "
+                f"{text[:60]}")
+        grid = _texts(out)
+        data = [r for r in grid if len(r) > 2 and r[2] in ("Co 0", "Co 1")]
+        assert len(data) == 2
+
     def test_missing_template_raises(self, config, temp_dir: Path):
         from app.models.config import AppConfig
 
         bad = config.model_copy(update={"template": config.template.model_copy(
             update={"small_template": "templates/nope.ots"})})
         with pytest.raises(FileNotFoundError):
-            TemplateFiller(bad).fill(_report(1), str(temp_dir / "x.ods"))
+            TemplateFiller(bad).fill(_report(1), str(temp_dir / "x.ods"), use_v3=False)
 
 
 class TestSplitRender:
@@ -127,7 +153,7 @@ class TestSplitRender:
                 ReportItem(contractor="ManualCo", workers=3, craftsmen=1,
                            helpers=2, details="10 Mason, 3 Helper"),
             ])
-        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "s.ods")))
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "s.ods"), use_v3=False))
         grid = _texts(out)
         split = self._row_for(grid, "SplitCo")
         assert (split[5], split[6], split[7], split[8]) == ("10", "7", "3", "")
@@ -140,7 +166,7 @@ class TestSplitRender:
         rep = Report(
             date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
             items=[ReportItem(contractor="OldCo", workers=4)])
-        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "l.ods")))
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "l.ods"), use_v3=False))
         row = self._row_for(_texts(out), "OldCo")
         assert (row[6], row[7], row[8]) == ("", "", "")
 
@@ -154,7 +180,7 @@ class TestSplitRender:
                            helpers=4),
                 ReportItem(contractor="A3", workers=6),  # unknown split
             ])
-        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "t.ods")))
+        out = Path(TemplateFiller(config).fill(rep, str(temp_dir / "t.ods"), use_v3=False))
         grid = _texts(out)
         (tot,) = [r for r in grid if "Total" in " ".join(r)]
         assert (tot[5], tot[6], tot[7]) == ("24", "11", "7")
@@ -191,7 +217,7 @@ class TestDedicatedColumns:
             date="2026-09-11", day="Friday", status=ReportStatus.DRAFT,
             items=[ReportItem(contractor="OldCo", workers=10, craftsmen=7,
                               helpers=3)])
-        out = Path(TemplateFiller(cfg).fill(rep, str(temp_dir / "r.ods")))
+        out = Path(TemplateFiller(cfg).fill(rep, str(temp_dir / "r.ods"), use_v3=False))
         from app.libre import ots as _ots
         doc = _ots.load_doc(str(out))
         table = _ots.first_table(doc)
@@ -210,7 +236,7 @@ class TestDedicatedColumns:
         cfg = config.model_copy(update={"template": config.template.model_copy(
             update={"small_template": str(tpl)})})
         with pytest.raises(LibreFillError):
-            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "x.ods"))
+            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "x.ods"), use_v3=False)
 
     def test_ambiguous_headers_fail_loudly(self, config, temp_dir: Path):
         from app.libre.filler import LibreFillError
@@ -220,7 +246,7 @@ class TestDedicatedColumns:
         cfg = config.model_copy(update={"template": config.template.model_copy(
             update={"small_template": str(tpl)})})
         with pytest.raises(LibreFillError):
-            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "y.ods"))
+            TemplateFiller(cfg).fill(_report(1), str(temp_dir / "y.ods"), use_v3=False)
 
 
 def _mixed_items(n):
@@ -268,7 +294,7 @@ class TestProductionTemplates:
         rep = Report(date="2026-09-11", day="Friday",
                      status=ReportStatus.DRAFT, items=_mixed_items(n))
         out = Path(TemplateFiller(cfg).fill(
-            rep, str(temp_dir / f"{name}.ods")))
+            rep, str(temp_dir / f"{name}.ods"), use_v3=False))
         grid = _texts(out)
         flat = "|".join(r[6] + "," + r[7] if len(r) > 7 else ""
                         for r in grid[:10])
@@ -302,14 +328,14 @@ class TestProductionTemplates:
         rep = Report(date="2026-09-11", day="Friday",
                      status=ReportStatus.DRAFT, items=_mixed_items(n))
         ods = Path(TemplateFiller(cfg).fill(
-            rep, str(temp_dir / f"{name}.ods")))
+            rep, str(temp_dir / f"{name}.ods"), use_v3=False))
         pdf_path = temp_dir / f"{name}.pdf"
         pdf = Path(PDFGenerator(cfg).convert_to_pdf(str(ods), str(pdf_path)))
         assert pdf.exists() and pdf.stat().st_size > 1000
         assert pdf.stat().st_mtime >= ods.stat().st_mtime - 1
         import re as _re
         pages = len(_re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
-        assert pages == {"small": 1, "medium": 2, "large": 3}[name]
+        assert pages == {"small": 1, "medium": 1, "large": 2}[name]  # v3: tighter pagination, no blank pages
 
 
 class TestContractorReport:

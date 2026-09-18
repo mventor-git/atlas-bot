@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.libre import ots
+from app.libre import design as daily_design
 from app.libre.columns import (
     FIELD_ALIASES,
     LibreFillError,
@@ -61,16 +62,30 @@ class TemplateFiller:
     def _select_template(self, row_count: int) -> Path:
         return self._config.get_template_for_row_count(row_count)
 
-    def fill(self, report: Report, output_path: Optional[str] = None) -> str:
+    def fill(self, report: Report, output_path: Optional[str] = None,
+             use_v3: bool = True) -> str:
         """Fill the template with report data and save as .ods.
 
         Args:
             report: The report containing date, day, and items.
             output_path: Optional output path (default: docs folder, ``<date>.ods``).
+            use_v3: Daily v3 composer on (default); False = legacy v1/v2 path.
 
         Returns:
             Path to the saved .ods file.
         """
+        items = list(report.items or [])
+        if use_v3 and items:
+            if output_path is None:
+                output_path = str(
+                    self._config.docs_folder_path / f"{report.date}.ods"
+                )
+            from app.libre import daily_v3 as _v3
+            return _v3.build(report, self._config, output_path)
+        return self._fill_legacy(report, output_path)
+
+    def _fill_legacy(self, report: Report,
+                     output_path: Optional[str] = None) -> str:
         items = list(report.items or [])
         template_path = self._select_template(len(items))
         self._template_path = template_path
@@ -87,10 +102,19 @@ class TemplateFiller:
         try:
             doc = ots.load_doc(template_path)
             table = ots.first_table(doc)
+            ots.expand_repeated_rows(table)
             self._fill_day_date(table, report)
             if items:
                 totals, cols = self._fill_items(table, items)
                 self._fill_totals(table, totals, cols)
+                header_idx = ots.find_first(table, HEADER_MARKERS)
+                totals_idx = ots.find_first(
+                    table, TOTALS_MARKERS, start=header_idx + 1)
+                daily_design.apply_daily_v2(doc, table, header_idx,
+                                            totals_idx, cols)
+            else:
+                daily_design.apply_no_labor(
+                    doc, table, report.date, report.site_id or "")
             return ots.save(doc, output_path)
         except (FileNotFoundError, LibreFillError):
             raise
