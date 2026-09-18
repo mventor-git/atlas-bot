@@ -86,6 +86,31 @@ def row_text(row: TableRow) -> str:
     return " ".join(cell_text(c) for c in row_cells(row))
 
 
+def expand_repeated_rows(table: Table) -> None:
+    """Split ``number-rows-repeated`` rows into individual elements.
+
+    LibreOffice compresses runs of identical (empty) slot rows into one
+    element. Writing distinct content into such a row would repeat it N
+    times at render time, so materialize each logical row first (bottom
+    up, reusing the blank-row builder, so indices stay valid). Repeats
+    above _PAD_CAP are sheet padding to the grid bottom (e.g. x1048546),
+    never written, and stay compressed.
+    """
+    _PAD_CAP = 1000
+    rows = list(table.getElementsByType(TableRow))
+    for i in range(len(rows) - 1, -1, -1):
+        reps = int(rows[i].getAttribute("numberrowsrepeated") or 1)
+        if reps <= 1 or reps > _PAD_CAP:
+            continue
+        if row_text(rows[i]).strip():
+            raise ValueError(
+                "repeated table row carries content; refusing to "
+                "multiply it at render time")
+        rows[i].removeAttribute("numberrowsrepeated")
+        for _ in range(reps - 1):
+            insert_blank_row(table, i, like=rows[i])
+
+
 def find_row(table: Table, marker: str, start: int = 0) -> int:
     """Index of first row at/after ``start`` containing ``marker``."""
     rows = table.getElementsByType(TableRow)

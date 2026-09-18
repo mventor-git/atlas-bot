@@ -102,6 +102,13 @@ def fill_hr(req: HRRequest, config: AppConfig, output_path: str | Path | None = 
                         text = text.replace(marker, value)
                 if "[RECEIPT]" not in text:
                     ots.set_cell_text(cell, text)
+        if req.request_type == HRRequestType.ADVANCE:
+            from app.libre import design as _design
+
+            rtl = (str(template.name).endswith("_ar.ots")
+                   or (lang or getattr(config, "language", "en")
+                       or "en").lower().startswith("ar"))
+            _design.apply_advance(doc, table, rtl=rtl)
         out = ots.save(doc, output_path)
         if req.request_type == HRRequestType.TRANSPORT and req.receipt_path:
             _embed_receipt(out, req.receipt_path)

@@ -571,18 +571,19 @@ class NotificationManager:
             logger.info("Auto-created no_report entry for %s @%s", today_str, site)
 
             # Generate empty document using empty-day.ots template if available
-            await self._generate_empty_doc(today_str)
+            await self._generate_empty_doc(today_str, site)
 
         except DatabaseError:
             logger.info("Report already exists for %s (concurrent creation)", today_str)
         except Exception as e:
             logger.error("Failed to auto-create no_report for %s: %s", today_str, e)
 
-    async def _generate_empty_doc(self, today_str: str) -> None:
-        """Generate an empty document file by copying the empty-day.ots template.
+    async def _generate_empty_doc(self, today_str: str, site: str = "") -> None:
+        """Compose the intentional no-labor empty-state onto empty-day.ots.
 
         Args:
             today_str: Today's date string for the output filename.
+            site: Tenant site shown on the document (no logic change).
         """
         empty_template = Path(self._config.notification.empty_template_file)
         if not empty_template.exists():
@@ -590,14 +591,19 @@ class NotificationManager:
             return
 
         try:
-            import shutil
+            from app.libre import design as libre_design
+            from app.libre import ots as libre_ots
 
             output_dir = self._config.docs_folder_path
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / f"empty_{today_str}.ods"
 
-            shutil.copy2(str(empty_template), str(output_path))
-            logger.info("Copied empty template to %s", output_path)
+            doc = libre_ots.load_doc(str(empty_template))
+            table = libre_ots.first_table(doc)
+            libre_ots.expand_repeated_rows(table)
+            libre_design.apply_no_labor(doc, table, today_str, site or "")
+            libre_ots.save(doc, str(output_path))
+            logger.info("Composed no-labor document at %s", output_path)
         except Exception as e:
             logger.error("Failed to generate empty document for %s: %s", today_str, e)
 

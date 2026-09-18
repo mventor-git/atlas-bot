@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.libre import ots
+from app.libre import design as period_design
 from app.libre.filler import LibreFillError
 from app.utils.logger import get_logger
 
@@ -94,6 +95,9 @@ class ContractorReportFiller:
                 summary_cells[0],
                 f"{SUMMARY_PREFIX} {len(entries)} entries, {total} total workers",
             )
+
+            period_design.apply_contractor(
+                doc, table, info_idx, header_idx, summary_idx)
 
             out = Path(output_path)
             out.parent.mkdir(parents=True, exist_ok=True)
