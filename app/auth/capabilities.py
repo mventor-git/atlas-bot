@@ -32,6 +32,7 @@ CAPABILITIES: dict[str, tuple[str, str]] = {
     "delegate_hr_request": ("SITE", "Delegate HR requests to HQ HR"),
     "decide_hr_request": ("SITE", "HR-decide requests (gate 2, final)"),
     "approve_daily_report": ("SITE", "Approve daily reports"),
+    "override_offhours": ("SITE", "Off-hours override with reason"),
     "view_site_reports": ("SITE", "View site reports"),
     "manage_attendance": ("SITE", "Manage site attendance"),
     # HQ / cross-site
@@ -64,7 +65,8 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
         "submit_leave", "submit_mission", "submit_advance",
         "submit_grievance", "submit_complaint", "submit_suggestion",
         "submit_resignation", "check_in", "check_out", "request_overtime",
-        "create_daily_report", "approve_daily_report", "view_site_reports",
+        "create_daily_report", "approve_daily_report", "override_offhours",
+        "view_site_reports",
         "manage_attendance", "view_hq_reports",
         "confirm_payout", "confirm_payroll_deduction",
         "submit_hr_request", "confirm_hr_request", "delegate_hr_request",
@@ -74,7 +76,8 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
         "submit_leave", "submit_mission", "submit_advance",
         "submit_grievance", "submit_complaint", "submit_suggestion",
         "submit_resignation", "check_in", "check_out", "request_overtime",
-        "create_daily_report", "approve_daily_report", "view_site_reports",
+        "create_daily_report", "approve_daily_report", "override_offhours",
+        "view_site_reports",
         "manage_attendance",
     }),
     "admin": frozenset({
@@ -82,7 +85,8 @@ ROLE_DEFAULTS: dict[str, frozenset] = {
         "submit_leave", "submit_mission", "submit_advance",
         "submit_grievance", "submit_complaint", "submit_suggestion",
         "submit_resignation", "check_in", "check_out", "request_overtime",
-        "create_daily_report", "approve_daily_report", "view_site_reports",
+        "create_daily_report", "approve_daily_report", "override_offhours",
+        "view_site_reports",
         "manage_attendance",
     }),
     "hr": frozenset({

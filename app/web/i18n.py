@@ -36,6 +36,7 @@ STRINGS = {
 }
 
 NAV = [
+    ("today", {"en": "Today Board", "ar": "لوحة اليوم"}),
     ("projects", {"en": "Projects / Sites", "ar": "المشاريع / المواقع"}),
     ("reports", {"en": "Daily Reports", "ar": "التقارير اليومية"}),
     ("approvals", {"en": "Approvals", "ar": "الاعتمادات"}),
@@ -70,7 +71,7 @@ def nav_items(lang: str):
 
 
 SECTIONS = [
-    ({"en": "Operate", "ar": "التشغيل"}, ["reports", "approvals", "attendance"]),
+    ({"en": "Operate", "ar": "التشغيل"}, ["today", "reports", "approvals", "attendance"]),
     ({"en": "People", "ar": "الأفراد"},
      ["employees", "hr", "grievances", "warnings"]),
     ({"en": "Manage", "ar": "الإدارة"},

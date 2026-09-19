@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Attendance claims</h1><p>{{ t('site') }}: {{ site }}</p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+{% if rows %}
+<table class="grid"><tr><th>#</th><th>Kind</th><th>Claimant</th><th>Day</th><th>Text</th><th></th></tr>
+{% for c in rows %}
+<tr><td>{{ c.id }}</td><td>{{ c.kind }}</td><td>{{ mask(c.chat_id) }}</td>
+<td>{{ c.day_date }}</td><td>{{ c.text }}</td>
+<td>{% if can_decide %}
+<form method="post" action="{{ url_for('hr.claim_decide', claim_id=c.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <input name="note" placeholder="Decision note (required)" style="inline-size:100%">
+  <p><button class="btn" type="submit" name="decision" value="approve">{{ t('approve') }}</button>
+  <button class="btn danger" type="submit" name="decision" value="deny">{{ t('reject') }}</button></p>
+</form>
+{% endif %}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<p><a href="{{ url_for('hr.queue') }}">← {{ t('back') }}</a></p>
+{% endblock %}

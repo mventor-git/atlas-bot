@@ -70,6 +70,14 @@ def home():
 def module_url(slug: str) -> str:
     """Single URL map for module slugs (sidebar, home cards)."""
     from flask import url_for
+    if slug == "today":
+        return url_for("today.board")
+    if slug == "projects":
+        return url_for("dev.sites")
+    if slug == "approvals":
+        return url_for("hr.queue")
+    if slug == "notifications":
+        return url_for("dev.notify_rules")
     if slug == "hr":
         return url_for("hr.dashboard")
     if slug == "config":
@@ -93,6 +101,12 @@ def module_page(slug: str):
                                           else "audit_view")))
     if slug in ("employees", "grievances", "warnings"):
         return redirect(url_for("hr." + slug))
+    if slug in ("projects",):
+        return redirect(url_for("dev.sites"))
+    if slug in ("approvals",):
+        return redirect(url_for("hr.queue"))
+    if slug in ("notifications",):
+        return redirect(url_for("dev.notify_rules"))
     info = PLACEHOLDERS.get(slug)
     if not info:
         from flask import abort
@@ -103,4 +117,5 @@ def module_page(slug: str):
         "placeholder.html",
         title=title_en if lang == "en" else title_ar,
         body=body_en if lang == "en" else body_ar,
-        backend=backend)
+        backend=backend,
+        soon="Coming soon" if lang == "en" else "قريبًا")

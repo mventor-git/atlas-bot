@@ -17,6 +17,7 @@ from app.repositories.attendance_day_repository import AttendanceDayRepository
 from app.repositories.attendance_repository import AttendanceRepository
 from app.repositories.case_repository import CaseRepository
 from app.repositories.discipline_repository import DisciplineRepository
+from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.event_log_repository import EventLogRepository
 from app.repositories.hr_repository import HRRepository
 from app.repositories.membership_repository import MembershipRepository
@@ -65,6 +66,7 @@ def build_services(config, db_manager):
         "db": db_manager,
         "user_repo": user_repo,
         "membership_repo": membership_repo,
+        "employees": EmployeeRepository(db_manager),
         "auth": auth_svc,
         "hr": HRService(hr_repo, money_repo),
         "money_repo": money_repo,
@@ -122,9 +124,11 @@ def create_app(config_path: str | Path | None = None) -> Flask:
     from app.web.views_hr import bp as hr_bp
     from app.web.views_setup import bp as setup_bp
     from app.web.views_shell import bp as shell_bp
+    from app.web.views_today import bp as today_bp
     from app.web.views_shell import module_url
 
     app.register_blueprint(auth_bp)
+    app.register_blueprint(today_bp)
     app.register_blueprint(hr_bp)
     app.register_blueprint(dev_bp)
     app.register_blueprint(setup_bp)

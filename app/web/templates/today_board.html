@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Today Board — {{ day }}</h1><p>Site: {{ site }}
+{% if off_hours %}<span class="badge warn">Off-hours (outside 8-17)</span>{% endif %}
+{% if override_ok %}<span class="badge accent">(off-hours) override confirmed</span>{% endif %}
+{% if report %}<span class="badge">{{ report.status.value }}</span>{% endif %}</p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
+
+<h2>Contractor Rows</h2>
+{% if items %}
+<table class="grid"><tr><th>Contractor</th><th>Type</th><th>Zone</th><th>Workers</th><th>Craftsmen</th><th>Helpers</th><th>Details</th>{% if can_edit %}<th></th>{% endif %}</tr>
+{% for it in items %}
+<tr><td>{{ it.contractor }}</td><td>{{ it.type or '—' }}</td><td>{{ it.zone or '—' }}</td>
+<td>{{ it.workers if it.workers is not none else '—' }}</td>
+<td>{{ it.craftsmen if it.craftsmen is not none else '—' }}</td>
+<td>{{ it.helpers if it.helpers is not none else '—' }}</td>
+<td>{{ it.details or '—' }}</td>
+{% if can_edit and report and report.status.value == 'draft' %}
+<td><form method="post" action="{{ url_for('today.save_row', day=day) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <input type="hidden" name="item_id" value="{{ it.id }}">
+  <input type="hidden" name="contractor" value="{{ it.contractor }}">
+  <input type="hidden" name="type" value="{{ it.type or '' }}">
+  <input type="hidden" name="zone" value="{{ it.zone or '' }}">
+  <input type="hidden" name="workers" value="{{ it.workers if it.workers is not none else '' }}">
+  <input type="hidden" name="craftsmen" value="{{ it.craftsmen if it.craftsmen is not none else '' }}">
+  <input type="hidden" name="helpers" value="{{ it.helpers if it.helpers is not none else '' }}">
+  <input name="details" value="{{ it.details or '' }}" style="inline-size:8em">
+  <button class="btn" type="submit">Save</button>
+</form></td>
+{% endif %}</tr>
+{% endfor %}</table>
+{% else %}<div class="empty">No rows yet for this date.</div>{% endif %}
+
+{% if can_edit and (not report or report.status.value == 'draft') %}
+<h2>Add Row</h2>
+<form method="post" action="{{ url_for('today.save_row', day=day) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label>Contractor <input name="contractor" required></label>
+  <label>Type <input name="type"></label>
+  <label>Zone <input name="zone"></label>
+  <label>Workers <input name="workers" inputmode="numeric"></label>
+  <label>Craftsmen <input name="craftsmen" inputmode="numeric"></label>
+  <label>Helpers <input name="helpers" inputmode="numeric"></label>
+  <label>Details <input name="details" style="inline-size:100%"></label>
+  <p><button class="btn" type="submit">Add row</button></p>
+</form>
+{% endif %}
+
+<h2>Finalize</h2>
+{% if report and report.status.value == 'draft' and can_finalize %}
+<form method="post" action="{{ url_for('today.finalize', day=day) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <button class="btn" type="submit">Finalize (Draft to Final)</button>
+</form>
+{% elif report %}
+<p>Report is {{ report.status.value }}. Finalize runs once (Draft to Final).</p>
+{% else %}
+<p>No report for this date yet.</p>
+{% endif %}
+
+{% if report %}
+<h2>Preview</h2>
+<p><a href="{{ url_for('today.v3_preview', day=day) }}" target="_blank">Open v3 preview (in browser)</a>
+· <a href="{{ url_for('today.v3_preview', day=day, download=1) }}">Download .ods</a></p>
+{% endif %}
+
+{% if off_hours and can_override and (not report or report.status.value == 'draft') %}
+<h2>Off-hours Override</h2>
+<form method="post" action="{{ url_for('today.override', day=day) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label for="reason">Reason (required)</label>
+  <input id="reason" name="reason" style="inline-size:100%" placeholder="Why work outside 8-17?">
+  <p><button class="btn" type="submit">Proceed</button></p>
+</form>
+<form method="post" action="{{ url_for('today.override_cancel', day=day) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <button class="btn danger" type="submit">Cancel</button>
+</form>
+{% endif %}
+
+<h2>Attendance Queue</h2>
+{% if att_queue %}<p>{{ att_queue|length }} open day(s) for {{ day }}.</p>
+{% else %}<div class="empty">No data yet</div>{% endif %}
+{% endblock %}
