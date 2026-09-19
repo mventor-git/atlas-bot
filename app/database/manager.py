@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS hr_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requester_chat_id TEXT NOT NULL,
     requester_name TEXT NOT NULL,
-    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime')),
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime', 'register')),
     amount REAL NOT NULL,
     reason TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
@@ -201,6 +201,21 @@ CREATE TABLE IF NOT EXISTS hr_requests (
 CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
+
+-- Employee directory (chat_id -> code + DB name; cards/audit display seam)
+CREATE TABLE IF NOT EXISTS employees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL UNIQUE,
+    employee_code TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'deactivated')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_employees_chat ON employees(chat_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_code ON employees(employee_code);
 
 -- Site memberships (008 tenancy: user -> sites + capability grants)
 CREATE TABLE IF NOT EXISTS user_site_memberships (
@@ -618,7 +633,7 @@ CREATE TABLE IF NOT EXISTS hr_requests (
     id SERIAL PRIMARY KEY,
     requester_chat_id TEXT NOT NULL,
     requester_name TEXT NOT NULL,
-    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime')),
+    request_type TEXT NOT NULL CHECK (request_type IN ('advance', 'transport', 'leave', 'mission', 'overtime', 'register')),
     amount REAL NOT NULL,
     reason TEXT NOT NULL,
     site_id TEXT NOT NULL DEFAULT 'default',
@@ -643,6 +658,20 @@ CREATE TABLE IF NOT EXISTS hr_requests (
 CREATE INDEX IF NOT EXISTS idx_hr_requests_site ON hr_requests(site_id);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_status ON hr_requests(status);
 CREATE INDEX IF NOT EXISTS idx_hr_requests_requester ON hr_requests(requester_chat_id);
+
+CREATE TABLE IF NOT EXISTS employees (
+    id SERIAL PRIMARY KEY,
+    chat_id TEXT NOT NULL UNIQUE,
+    employee_code TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'deactivated')),
+    created_at TEXT NOT NULL DEFAULT (now()),
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_employees_chat ON employees(chat_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_code ON employees(employee_code);
 
 CREATE TABLE IF NOT EXISTS user_site_memberships (
     id SERIAL PRIMARY KEY,
@@ -976,6 +1005,12 @@ class DatabaseManager:
         self._ensure_site_uniques()
         # Review states + stamp columns on pre-existing reports (027).
         self._ensure_reports_review()
+        # Employee directory on pre-existing DBs, both backends (idempotent).
+        self._ensure_employees()
+        # employees.status on pre-existing DBs (idempotent).
+        self._ensure_employees_status()
+        # request_type='register' on pre-existing hr_requests (idempotent).
+        self._ensure_hr_requests_register()
 
         logger.info(
             "Database initialized: %s (backend=%s)",
@@ -1261,6 +1296,111 @@ class DatabaseManager:
                 original_exception=e,
             ) from e
 
+    def _ensure_hr_requests_register(self) -> None:
+        """Allow request_type='register' on old DBs (idempotent).
+
+        Probe-insert under a savepoint (backend-agnostic): when the CHECK
+        rejects 'register', rebuild the table preserving every column.
+        """
+        if not self.table_exists("hr_requests"):
+            return  # fresh installs get the widened DDL directly
+        try:
+            self.execute("SAVEPOINT reg_check")
+            self.execute(
+                """INSERT INTO hr_requests (requester_chat_id, requester_name,
+                    request_type, amount, reason, site_id, created_at)
+                   VALUES ('_probe', '_probe', 'register', 0, '_probe',
+                           'default', '2000-01-01T00:00:00')"""
+            )
+            self.execute("ROLLBACK TO SAVEPOINT reg_check")
+            self.execute("RELEASE reg_check")
+            return  # CHECK already allows register
+        except DatabaseError:
+            pass
+        for stmt in ("ROLLBACK TO SAVEPOINT reg_check", "RELEASE reg_check"):
+            try:
+                self.execute(stmt)
+            except DatabaseError:
+                pass
+        cols = ("id, requester_chat_id, requester_name, request_type,"
+                " amount, reason, site_id, trip_date, report_ref,"
+                " receipt_path, deduction_month, start_date, end_date,"
+                " hours, status, assigned_to,"
+                " delegated, note, signatures, pdf_path, created_at,"
+                " updated_at")
+        try:
+            conn = self._get_connection()
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("ALTER TABLE hr_requests RENAME TO hr_requests_old")
+            conn.execute(
+                """CREATE TABLE hr_requests (
+                    id %s,
+                    requester_chat_id TEXT NOT NULL,
+                    requester_name TEXT NOT NULL,
+                    request_type TEXT NOT NULL CHECK (request_type IN
+                        ('advance', 'transport', 'leave', 'mission', 'overtime',
+                         'register')),
+                    amount REAL NOT NULL,
+                    reason TEXT NOT NULL,
+                    site_id TEXT NOT NULL DEFAULT 'default',
+                    trip_date TEXT,
+                    report_ref TEXT,
+                    receipt_path TEXT,
+                    deduction_month TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    hours REAL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'pm_confirmed', 'approved', 'rejected')),
+                    assigned_to TEXT,
+                    delegated INTEGER NOT NULL DEFAULT 0,
+                    note TEXT,
+                    signatures TEXT NOT NULL DEFAULT '[]',
+                    pdf_path TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                )""" % ("SERIAL PRIMARY KEY" if self._pg else "INTEGER PRIMARY KEY AUTOINCREMENT")
+            )
+            # Old pre-v2 rows lack the date/hours columns: copy only shared
+            # columns (v2 widening runs first, so this is normally a no-op).
+            old_cols = [c for c in cols.split(", ") if self.column_exists(
+                "hr_requests_old", c.strip())]
+            shared = ", ".join(old_cols)
+            conn.execute(
+                "INSERT INTO hr_requests (%s) SELECT %s FROM hr_requests_old"
+                % (shared, shared)
+            )
+            conn.execute("DROP TABLE hr_requests_old")
+            if not self._pg:
+                conn.execute("PRAGMA foreign_keys=ON")
+            conn.commit()
+            logger.info("hr_requests widened for register type.")
+        except _DB_ERRORS as e:
+            try:
+                if not self._pg:
+                    conn.execute("PRAGMA foreign_keys=ON")
+            except _DB_ERRORS:
+                pass
+            conn.rollback()
+            raise DatabaseError(
+                f"Failed to widen hr_requests for register: {e}",
+                original_exception=e,
+            ) from e
+
+    def _ensure_employees_status(self) -> None:
+        """Add employees.status on old DBs (idempotent, no rebuild)."""
+        if not self.table_exists("employees"):
+            return  # fresh installs get the column in DDL directly
+        if self.column_exists("employees", "status"):
+            return
+        self.execute(
+            "ALTER TABLE employees ADD COLUMN status TEXT NOT NULL "
+            "DEFAULT 'active'"
+        )
+        self.commit()
+        logger.info("Added status to employees.")
+
     def _ensure_site_uniques(self) -> None:
         """Replace global UNIQUE(date) with UNIQUE(date, site_id) on old DBs.
 
@@ -1419,6 +1559,30 @@ class DatabaseManager:
                 f"Failed to widen reports: {e}",
                 original_exception=e,
             ) from e
+
+    def _ensure_employees(self) -> None:
+        """Create the employee directory on old DBs (idempotent).
+
+        Backend-agnostic: self.execute() translates placeholders and
+        SQLite-only DDL tokens for Postgres automatically.
+        """
+        self.execute(
+            """CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL UNIQUE,
+                employee_code TEXT NOT NULL UNIQUE,
+                full_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'deactivated')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT
+            )"""
+        )
+        self.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_code "
+            "ON employees(employee_code)"
+        )
+        self.commit()
 
     def execute(self, sql: str, params: tuple = ()):
         """Execute a SQL statement.

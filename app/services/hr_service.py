@@ -21,6 +21,7 @@ from app.models.hr import (
 )
 from app.repositories.hr_repository import HRRepository
 from app.repositories.money_repository import MoneyRepository
+from app.services.hr_priority import is_low, priority_for, sort_low_last
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
 
@@ -154,6 +155,164 @@ class HRService:
             site_id=site_id or driver.site_id(),
         ))
 
+    # --- Registration (employee onboarding lifecycle) ---
+
+    def request_registration(
+        self, chat_id: str, name: str,
+        site_id: str | None = None,
+    ) -> HRRequest:
+        """File a self-registration request (bot-guided name capture)."""
+        full_name = (name or "").strip()
+        if len(full_name) < 2:
+            raise DatabaseError("Full name is required.")
+        site = (site_id or "").strip() or driver.site_id()
+        for existing in self._repo.list_for_requester(chat_id, site_id=site):
+            if (existing.request_type == HRRequestType.REGISTER
+                    and existing.status == HRRequestStatus.PENDING):
+                raise DatabaseError(
+                    "A registration request is already pending.")
+        return self._repo.add(HRRequest(
+            requester_chat_id=chat_id,
+            requester_name=full_name,
+            request_type=HRRequestType.REGISTER,
+            amount=0,
+            reason=full_name,
+            site_id=site,
+        ))
+
+    def pending_registrations(
+        self, site_id: str | None = None,
+    ) -> list[HRRequest]:
+        """Pending register-type rows (approval queue slice)."""
+        return [r for r in self._repo.list_pending(site_id=site_id)
+                if r.request_type == HRRequestType.REGISTER]
+
+    def approve_registration(
+        self, request_id: int, admin_chat_id: str, admin_name: str,
+        role: str, target_site: str, employees, auth,
+        site_id: str | None = None,
+    ) -> HRRequest:
+        """Single-action admin approve: role + site assigned atomically.
+
+        Creates the EMP-### directory row and the membership grant
+        alongside the approval (no second trip). Re-hire reactivates the
+        same chat row with a NEW code; the retired code stays in audit.
+        """
+        from app.services.authorization_service import AuthorizationService
+
+        req = self._get(request_id, site_id)
+        if req.request_type != HRRequestType.REGISTER:
+            raise DatabaseError(
+                f"Request {request_id} is not a registration.")
+        if req.status != HRRequestStatus.PENDING:
+            raise DatabaseError(
+                f"Request {request_id} is {req.status}, "
+                "registration approval needs pending.")
+        if str(admin_chat_id) == str(req.requester_chat_id):
+            raise DatabaseError(
+                "Requester cannot approve their own registration.")
+        clean_role = (role or "").strip()
+        if (clean_role not in AuthorizationService.APPROVED_ROLES
+                or clean_role in ("pending", "rejected")):
+            raise DatabaseError(f"Unknown role '{clean_role}'.")
+        target = (target_site or "").strip()
+        if not target:
+            raise DatabaseError("Site assignment is required.")
+        current = employees.get(req.requester_chat_id)
+        if current is not None and current.active:
+            raise DatabaseError("Chat is already registered.")
+        name = (req.reason or req.requester_name or "").strip()
+        if current is None:
+            emp = employees.issue_code(req.requester_chat_id, name)
+        else:  # re-hire: fresh code, retired code survives in audit only
+            emp = employees.register(req.requester_chat_id,
+                                     employees.next_code(), name)
+        auth.register_or_get(req.requester_chat_id)
+        if auth.set_role(req.requester_chat_id, clean_role,
+                         changed_by=admin_chat_id) is None:
+            raise DatabaseError(
+                f"Could not assign role '{clean_role}'.")
+        auth.grant_membership(req.requester_chat_id, target, [])
+        req.status = HRRequestStatus.APPROVED
+        req.note = f"{emp.employee_code} · {clean_role} @ {target}"
+        _sign(req, "admin", admin_chat_id, admin_name, "approved",
+              note=req.note)
+        return self._repo.save(req)
+
+    def reject_registration(
+        self, request_id: int, admin_chat_id: str, admin_name: str,
+        note: str = "", site_id: str | None = None,
+    ) -> HRRequest:
+        """Admin rejects a registration with a reason (note required)."""
+        req = self._get(request_id, site_id)
+        if req.request_type != HRRequestType.REGISTER:
+            raise DatabaseError(
+                f"Request {request_id} is not a registration.")
+        if req.status != HRRequestStatus.PENDING:
+            raise DatabaseError(
+                f"Request {request_id} is {req.status}, "
+                "registration rejection needs pending.")
+        clean = (note or "").strip()
+        if not clean:
+            raise DatabaseError("Rejection needs a reason.")
+        req.status = HRRequestStatus.REJECTED
+        req.note = clean
+        _sign(req, "admin", admin_chat_id, admin_name, "rejected",
+              note=clean)
+        return self._repo.save(req)
+
+    def deactivate_employee(
+        self, chat_id: str, employees, auth,
+    ) -> bool:
+        """Deactivate a directory row + suspend every active membership.
+
+        History kept (row + audit); resolve() goes UNMAPPED so all
+        card/actor seams and capability checks block immediately.
+        """
+        emp = employees.get(chat_id)
+        if emp is None or not emp.active:
+            raise DatabaseError("No active employee for that chat.")
+        for site in auth.sites_for_user(chat_id):
+            auth.suspend_membership(chat_id, site)
+        return employees.deactivate(chat_id)
+
+    def update_employee(
+        self, chat_id: str, employees, auth, full_name: str | None = None,
+        role: str | None = None, site_id: str | None = None,
+        changed_by: str = "",
+    ):
+        """Edit name and/or role and/or site in one admin action.
+
+        Name keeps the same EMP code (history via audit); role uses the
+        existing set_role seam; site grants the new membership (old rows
+        stay for history, suspend is a separate deactivate step).
+        """
+        from app.services.authorization_service import AuthorizationService
+
+        emp = employees.get(chat_id)
+        if emp is None or not emp.active:
+            raise DatabaseError("No active employee for that chat.")
+        if full_name is not None:
+            clean = str(full_name or "").strip()
+            if len(clean) < 2:
+                raise DatabaseError("Full name is required.")
+            emp = employees.register(chat_id, emp.employee_code, clean)
+        if role is not None:
+            clean_role = str(role or "").strip()
+            if (clean_role not in AuthorizationService.APPROVED_ROLES
+                    or clean_role in ("pending", "rejected")):
+                raise DatabaseError(f"Unknown role '{clean_role}'.")
+            if auth.set_role(chat_id, clean_role,
+                             changed_by=changed_by) is None:
+                raise DatabaseError(f"Could not assign role '{clean_role}'.")
+        if site_id is not None:
+            target = str(site_id or "").strip()
+            if not target:
+                raise DatabaseError("Site assignment is required.")
+            auth.register_or_get(chat_id)
+            auth.grant_membership(chat_id, target, [])
+        return emp
+
     # --- Chain transitions ---
 
     def confirm_pm(
@@ -162,6 +321,9 @@ class HRService:
     ) -> HRRequest:
         """Site PM confirms (gate 1). Moves pending -> pm_confirmed."""
         req = self._get(request_id, site_id)
+        if req.request_type == HRRequestType.REGISTER:
+            raise DatabaseError(
+                "Registrations use the admin single-action approval.")
         if req.status != HRRequestStatus.PENDING:
             raise DatabaseError(
                 f"Request {request_id} is {req.status}, PM confirm needs pending.")
@@ -179,6 +341,9 @@ class HRService:
     ) -> HRRequest:
         """PM hands the request to HQ HR (single hop, no re-delegation)."""
         req = self._get(request_id, site_id)
+        if req.request_type == HRRequestType.REGISTER:
+            raise DatabaseError(
+                "Registrations use the admin single-action approval.")
         if req.status not in (HRRequestStatus.PENDING, HRRequestStatus.PM_CONFIRMED):
             raise DatabaseError(
                 f"Request {request_id} is {req.status}, cannot delegate.")
@@ -200,6 +365,9 @@ class HRService:
     ) -> HRRequest:
         """HQ HR approves or rejects (gate 2, final)."""
         req = self._get(request_id, site_id)
+        if req.request_type == HRRequestType.REGISTER:
+            raise DatabaseError(
+                "Registrations use the admin single-action approval.")
         if req.status != HRRequestStatus.PM_CONFIRMED:
             raise DatabaseError(
                 f"Request {request_id} is {req.status}, HR decision needs PM confirmation.")
@@ -377,6 +545,14 @@ class HRService:
     def pending(self, site_id: str | None = None) -> list[HRRequest]:
         """Public site queue of pending confirmations/decisions."""
         return self._repo.list_pending(site_id=site_id)
+
+    def priority(self, request: HRRequest) -> str:
+        """'low' when recommended items are missing, else 'normal'."""
+        return priority_for(request)
+
+    def queue(self, site_id: str | None = None) -> list[HRRequest]:
+        """Approver queue, LOW last (filed, never blocked; order only)."""
+        return sort_low_last(self.pending(site_id=site_id))
 
     def pending_overtime(self, site_id: str | None = None) -> list[HRRequest]:
         """Overtime requests still awaiting PM confirmation (031 sweep)."""

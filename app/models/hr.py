@@ -19,6 +19,7 @@ class HRRequestType:
     LEAVE = "leave"
     MISSION = "mission"
     OVERTIME = "overtime"
+    REGISTER = "register"
 
 
 class HRRequestStatus:

@@ -191,6 +191,26 @@ class AuditService:
             report_status=report.status.value if report.status else "unknown",
         )
 
+    def log_event(
+        self,
+        telegram_user: str,
+        user_role: str,
+        action: str,
+        details: str = "",
+        site_id: str | None = None,
+    ) -> UserActivityLog:
+        """Generic trail write for non-report transitions (register lifecycle).
+
+        Reuses the existing user_activity_log table; never a new table.
+        """
+        return self._repo.log_activity(UserActivityLog(
+            telegram_user=str(telegram_user),
+            user_role=user_role or "pending",
+            action=action,
+            details=details or "",
+            site_id=site_id,
+        ))
+
     # --- Queries ---
 
     def get_user_activity(self, telegram_user: str, limit: int = 100) -> list[UserActivityLog]:

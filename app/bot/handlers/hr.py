@@ -25,6 +25,8 @@ from app.bot import site_session
 from app.bot.keyboards import hr_menu_keyboard, hr_month_keyboard
 from app.bot.vendor_hermes import normalize_telegram_chat_id, visible_text
 from app.models.hr import HRRequest, HRRequestStatus, HRRequestType
+from app.repositories.employee_repository import REGISTER_HINT
+from app.services.hr_priority import is_low
 from app.services.hr_service import HRService
 from app.utils.exceptions import DatabaseError
 from app.utils.logger import get_logger
@@ -48,6 +50,32 @@ def _hr(context: ContextTypes.DEFAULT_TYPE) -> HRService:
     return context.bot_data["hr_service"]
 
 
+def _employees(context: ContextTypes.DEFAULT_TYPE):
+    """Employee directory repo (None when unwired: tests/dev)."""
+    try:
+        return context.bot_data.get("employee_repo")
+    except Exception:
+        return None
+
+
+def _who(context: ContextTypes.DEFAULT_TYPE, chat_id: str) -> str:
+    """Card identity: ``CODE · DB-name``; never Telegram name/chat digits."""
+    repo = _employees(context)
+    if repo is None:
+        return "UNMAPPED · limited"
+    return repo.display(chat_id)
+
+
+def _actor(context: ContextTypes.DEFAULT_TYPE, chat_id: str,
+           tg_name: str) -> str:
+    """Stored actor name: DB full_name when mapped, else Telegram name."""
+    repo = _employees(context)
+    if repo is None:
+        return tg_name
+    code, db_name = repo.resolve(chat_id)
+    return db_name if code != "UNMAPPED" else tg_name
+
+
 def _role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     chat_id, _ = _me(update)
     return _auth(context).get_role(chat_id)
@@ -57,11 +85,15 @@ def _req_date(req) -> str:
     return (getattr(req, "created_at", "") or "")[:10]
 
 
-def _render(req: HRRequest) -> str:
+def _render(req: HRRequest, who: str = "") -> str:
     kind = "Advance" if req.request_type == HRRequestType.ADVANCE else "Transport"
     lines = [
         f"*{kind} #{req.id}* - `{req.status}`",
-        f"From: {req.requester_name}",
+        f"From: {who or req.requester_name}",
+    ]
+    if is_low(req):
+        lines.append("Priority: LOW — incomplete docs (filed, never blocked)")
+    lines += [
         f"Amount: {req.amount:g}",
         f"Reason: {req.reason}",
     ]
@@ -104,8 +136,11 @@ def _reason_ok(reason: str) -> bool:
     return bool(text) and text.lower() not in _JUNK_REASONS
 
 
-def _queue_text(rows) -> str:
-    return "\n\n---\n\n".join(_render(r) for r in rows[:10])
+def _queue_text(rows, who_of=None) -> str:
+    if who_of is None:
+        return "\n\n---\n\n".join(_render(r) for r in rows[:10])
+    return "\n\n---\n\n".join(_render(r, who_of(r.requester_chat_id))
+                              for r in rows[:10])
 
 
 def _queue_keyboard(rows, role: str) -> InlineKeyboardMarkup | None:
@@ -120,6 +155,14 @@ def _queue_keyboard(rows, role: str) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(flat) if flat else None
 
 
+def _with_my_requests(markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup:
+    """Queue-view footer: My Requests one tap away (HR menu stays 3-max)."""
+    mine = [InlineKeyboardButton("My Requests", callback_data="hr_my")]
+    if markup is None:
+        return InlineKeyboardMarkup([mine])
+    return InlineKeyboardMarkup(list(markup.inline_keyboard) + [mine])
+
+
 async def _send_queue(update: Update, text: str,
                       markup: InlineKeyboardMarkup | None) -> None:
     # Single edit-in-place view: callback presses edit the same message, so
@@ -130,8 +173,10 @@ async def _send_queue(update: Update, text: str,
             await query.edit_message_text(text, parse_mode="Markdown",
                                           reply_markup=markup)
             return
-        except Exception:
-            pass  # message deleted/identical: fall through to one reply
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return  # identical refresh: keep the single message, no duplicate
+            pass  # message deleted: fall through to one reply
     await update.effective_message.reply_text(text, parse_mode="Markdown",
                                               reply_markup=markup)
 
@@ -181,7 +226,8 @@ async def my_requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text("No HR requests.")
         return
     rows = sorted(rows, key=lambda r: r.created_at)[:10]
-    await _send_queue(update, _queue_text(rows),
+    who_of = lambda chat: _who(context, chat)  # noqa: E731 single-card seam
+    await _send_queue(update, _queue_text(rows, who_of),
                       _queue_keyboard(rows, _role(update, context)))
 
 
@@ -198,13 +244,14 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                ("confirm_hr_request", "delegate_hr_request", "decide_hr_request")):
         await update.effective_message.reply_text("Approval queue needs a reviewer grant.")
         return
-    rows = _hr(context).pending(site_id=site)
+    rows = _hr(context).queue(site_id=site)  # LOW last, never dropped
     if not rows:
         await update.effective_message.reply_text("Approval queue is empty.")
         return
     rows = rows[:10]
-    await _send_queue(update, _queue_text(rows),
-                      _queue_keyboard(rows, role))
+    who_of = lambda chat: _who(context, chat)  # noqa: E731 single-card seam
+    await _send_queue(update, _queue_text(rows, who_of),
+                      _with_my_requests(_queue_keyboard(rows, role)))
 
 
 # --- text states ---
@@ -329,10 +376,16 @@ async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("Send a real reason - what is the money for?")
         return
     service = _hr(context)
+    repo = _employees(context)
+    filing_name = name
+    if repo is not None:
+        code, db_name = repo.resolve(chat_id)
+        if code != "UNMAPPED":
+            filing_name = db_name  # DB name on file; telegram name never shown
     try:
         if flow.get("type") == HRRequestType.TRANSPORT:
             req = service.request_transport(
-                chat_id, name, flow["amount"], flow["reason"],
+                chat_id, filing_name, flow["amount"], flow["reason"],
                 trip_date=flow.get("trip_date", ""),
                 report_ref=flow.get("report_ref", ""),
                 receipt_path=flow.get("receipt_path", ""),
@@ -340,7 +393,7 @@ async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         else:
             req = service.request_advance(
-                chat_id, name, flow["amount"], flow["reason"],
+                chat_id, filing_name, flow["amount"], flow["reason"],
                 site_id=flow.get("site"))
     except DatabaseError as e:
         await update.message.reply_text(f"Could not file the request: {e}")
@@ -348,7 +401,7 @@ async def _create_request(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.pop("hr_flow", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(
-        f"Filed:\n{_render(req)}\n\nStatus: pending PM confirmation.",
+        f"Filed:\n{_render(req, _who(context, chat_id))}\n\nStatus: pending PM confirmation.",
         parse_mode="Markdown",
         reply_to_message_id=update.message.message_id,
     )
@@ -364,15 +417,15 @@ async def handle_reject_note(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     service = _hr(context)
     try:
-        req = service.decide_hr(req_id, chat_id, name, False, note=note,
-                                site_id=site)
+        req = service.decide_hr(req_id, chat_id, _actor(context, chat_id, name),
+                                False, note=note, site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not reject: {e}")
         return
     context.user_data.pop("hr_reject_id", None)
     context.user_data.pop("hr_reject_site", None)
     context.user_data.pop("state", None)
-    await update.message.reply_text(f"Rejected by {name}:\n{_render(req)}", parse_mode="Markdown",
+    await update.message.reply_text(f"Rejected by {_who(context, chat_id)}:\n{_render(req, _who(context, req.requester_chat_id))}", parse_mode="Markdown",
                                       reply_to_message_id=update.message.message_id)
     from app.bot.notify import notify
 
@@ -402,14 +455,16 @@ async def handle_delegate_target(update: Update, context: ContextTypes.DEFAULT_T
             "Target has no HR decision rights at this site.")
         return
     try:
-        req = service.delegate_to_hr(req_id, chat_id, name, target, site_id=site)
+        req = service.delegate_to_hr(req_id, chat_id,
+                                     _actor(context, chat_id, name),
+                                     target, site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not delegate: {e}")
         return
     context.user_data.pop("hr_delegate_id", None)
     context.user_data.pop("hr_delegate_site", None)
     context.user_data.pop("state", None)
-    await update.message.reply_text(f"Delegated to HR:\n{_render(req)}", parse_mode="Markdown")
+    await update.message.reply_text(f"Delegated to HR:\n{_render(req, _who(context, req.requester_chat_id))}", parse_mode="Markdown")
     from app.bot.notify import notify
 
     await notify(context, "case_update", target, req.site_id,
@@ -433,8 +488,9 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
         return
     service = _hr(context)
     try:
-        req = service.decide_hr(req_id, chat_id, name, True, deduction_month=month,
-                                site_id=site)
+        req = service.decide_hr(req_id, chat_id,
+                                _actor(context, chat_id, name), True,
+                                deduction_month=month, site_id=site)
     except DatabaseError as e:
         await update.message.reply_text(f"Could not approve: {e}")
         return
@@ -442,7 +498,7 @@ async def handle_deduction_month(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("hr_approve_site", None)
     context.user_data.pop("state", None)
     await _after_approval(update, context, service, req)
-    await update.message.reply_text(f"Approved by {name}:\n{_render(req)}", parse_mode="Markdown",
+    await update.message.reply_text(f"Approved by {_who(context, chat_id)}:\n{_render(req, _who(context, req.requester_chat_id))}", parse_mode="Markdown",
                                     reply_to_message_id=update.message.message_id)
     from app.bot.notify import notify
 
@@ -515,11 +571,13 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text("PM confirmation needs a PM account.")
             return
         try:
-            req = service.confirm_pm(req_id, chat_id, name, site_id=site)
+            req = service.confirm_pm(req_id, chat_id,
+                                     _actor(context, chat_id, name),
+                                     site_id=site)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not confirm: {e}")
             return
-        await query.edit_message_text(f"Confirmed by {name}:\n{_render(req)}", parse_mode="Markdown")
+        await query.edit_message_text(f"Confirmed by {_who(context, chat_id)}:\n{_render(req, _who(context, req.requester_chat_id))}", parse_mode="Markdown")
         from app.bot.notify import notify
 
         await notify(context, "leave_decision", req.requester_chat_id,
@@ -552,13 +610,14 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         else:
             try:
-                decided = service.decide_hr(req_id, chat_id, name, True,
-                                            site_id=site)
+                decided = service.decide_hr(req_id, chat_id,
+                                            _actor(context, chat_id, name),
+                                            True, site_id=site)
             except DatabaseError as e:
                 await query.edit_message_text(f"Could not approve: {e}")
                 return
             await _after_approval(update, context, service, decided)
-            await query.edit_message_text(f"Approved by {name}:\n{_render(decided)}", parse_mode="Markdown")
+            await query.edit_message_text(f"Approved by {_who(context, chat_id)}:\n{_render(decided, _who(context, decided.requester_chat_id))}", parse_mode="Markdown")
             from app.bot.notify import notify
 
             await notify(context, "leave_decision", decided.requester_chat_id,
@@ -579,7 +638,8 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         month = parts[1]
         try:
-            req = service.decide_hr(req_id, chat_id, name, True,
+            req = service.decide_hr(req_id, chat_id,
+                                    _actor(context, chat_id, name), True,
                                     deduction_month=month, site_id=site)
         except DatabaseError as e:
             await query.edit_message_text(f"Could not approve: {e}")
@@ -587,7 +647,7 @@ async def handle_hr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("hr_approve_id", None)
         context.user_data.pop("state", None)
         await _after_approval(update, context, service, req)
-        await query.edit_message_text(f"Approved by {name}:\n{_render(req)}", parse_mode="Markdown")
+        await query.edit_message_text(f"Approved by {_who(context, chat_id)}:\n{_render(req, _who(context, req.requester_chat_id))}", parse_mode="Markdown")
         from app.bot.notify import notify
 
         await notify(context, "leave_decision", req.requester_chat_id,
@@ -677,6 +737,7 @@ async def member_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     /hr_member grant  <chat_id> <site_id> [caps|comma,list|role]
     /hr_member suspend <chat_id> <site_id>
     /hr_member revoke  <chat_id> <site_id>
+    /hr_member employee <chat_id> <CODE> <Full Name...>  (directory register/update)
 
     Superadmin only (bootstrap authority). Sites are validated against
     config.sites so typos cannot mint orphan permissions.
@@ -686,6 +747,26 @@ async def member_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Only the superadmin manages memberships.")
         return
     parts = (update.message.text or "").split()
+    if len(parts) >= 2 and parts[1] == "employee":
+        # Directory register/update: the single admin path (no web twin).
+        if len(parts) < 5:
+            await update.message.reply_text(
+                "Usage: /hr_member employee <chat_id> <CODE> <Full Name>")
+            return
+        _, _, target, code = parts[:4]
+        full_name = " ".join(parts[4:])
+        repo = _employees(context)
+        if repo is None:
+            await update.message.reply_text("Employee directory is not wired.")
+            return
+        try:
+            repo.register(target, code, full_name)
+        except ValueError as e:
+            await update.message.reply_text(f"Rejected: {e}")
+            return
+        await update.message.reply_text(
+            f"Employee {code} · {full_name} ↔ registered.")
+        return
     if len(parts) < 4:
         await update.message.reply_text(
             "Usage: /hr_member grant|suspend|revoke <chat_id> <site_id> [caps]")
@@ -921,18 +1002,19 @@ async def _create_lmo_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     flow = context.user_data.get("hr_flow", {})
     service = _hr(context)
     kind = flow.get("type")
+    filing_name = _actor(context, chat_id, name)
     try:
         if kind == "leave":
             req = service.request_leave(
-                chat_id, name, flow["reason"], flow["start"], flow["end"],
+                chat_id, filing_name, flow["reason"], flow["start"], flow["end"],
                 site_id=flow.get("site"))
         elif kind == "mission":
             req = service.request_mission(
-                chat_id, name, flow["reason"], flow["start"], flow["end"],
+                chat_id, filing_name, flow["reason"], flow["start"], flow["end"],
                 site_id=flow.get("site"))
         elif kind == "overtime":
             req = service.request_overtime(
-                chat_id, name, flow.get("date", ""), flow["hours"],
+                chat_id, filing_name, flow.get("date", ""), flow["hours"],
                 flow.get("reason", "overtime"), site_id=flow.get("site"))
         else:
             await update.message.reply_text("Unknown request type - start over.")
@@ -943,7 +1025,7 @@ async def _create_lmo_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.pop("hr_flow", None)
     context.user_data.pop("state", None)
     await update.message.reply_text(
-        f"Filed {kind} #{req.id}:\n{_render(req)}\n\nStatus: pending PM confirmation.",
+        f"Filed {kind} #{req.id}:\n{_render(req, _who(context, chat_id))}\n\nStatus: pending PM confirmation.",
         parse_mode="Markdown",
     )
 
