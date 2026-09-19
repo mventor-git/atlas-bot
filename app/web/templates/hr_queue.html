@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>HR Requests</h1><p>{{ t('site') }}: {{ site }}</p></div>
+{% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
 <form class="filters" method="get">
   <div><label>Type</label><select name="type" onchange="this.form.submit()">
     <option value="">—</option>
@@ -16,9 +17,24 @@
 {% if rows %}
 <table class="grid"><tr><th>#</th><th>Type</th><th>Requester</th><th>Amount</th><th>{{ t('status') }}</th><th></th></tr>
 {% for r in rows %}
-<tr><td>{{ r.id }}</td><td>{{ r.request_type }}</td><td>{{ r.requester_name }}</td>
-<td>{{ r.amount }}</td><td><span class="badge {{ 'warn' if r.status=='pending' else 'accent' }}">{{ r.status }}</span></td>
-<td><a href="{{ url_for('hr.detail', req_id=r.id) }}">{{ t('details') }}</a></td></tr>
+<tr><td>{{ r.id }}</td><td>{{ r.request_type }}</td><td>{{ who.get(r.requester_chat_id, 'UNMAPPED · limited') }}</td>
+<td>{{ r.amount }}</td><td><span class="badge {{ 'warn' if r.status=='pending' else 'accent' }}">{{ r.status }}</span>{% if prio.get(r.id) == 'low' %} <span class="badge warn">LOW</span>{% endif %}</td>
+<td><a href="{{ url_for('hr.detail', req_id=r.id) }}">{{ t('details') }}</a>
+{% if r.status == 'pending' and can_confirm %}
+<form method="post" action="{{ url_for('hr.confirm', req_id=r.id) }}" style="display:inline">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <button class="btn" type="submit">{{ t('confirm') }}</button>
+</form>
+{% endif %}
+{% if r.status in ('pending','pm_confirmed') and can_delegate and not r.delegated %}
+<form method="post" action="{{ url_for('hr.delegate', req_id=r.id) }}" style="display:inline">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <select name="target">{% for h in hr_targets %}<option value="{{ h }}">{{ who.get(h, 'UNMAPPED · limited') }}</option>{% endfor %}</select>
+  <button class="btn" type="submit">Delegate</button>
+</form>
+{% endif %}
+</td></tr>
 {% endfor %}</table>
 {% else %}<div class="empty">{{ t('no_data') }}</div>{% endif %}
+<p><a href="{{ url_for('hr.claims') }}">Attendance claims</a></p>
 {% endblock %}

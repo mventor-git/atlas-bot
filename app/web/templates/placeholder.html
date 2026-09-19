@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>{{ title }}</h1></div>
-<div class="notice">{{ body }}</div>
-<p><span class="badge accent">{{ t('planned') }}</span></p>
-<p style="color:var(--stone)">Backend: {{ backend }}</p>
+<div class="card">
+  <p>{{ body }}</p>
+  <p><span class="badge accent">{{ soon }}</span></p>
+  <p style="color:var(--stone)">Backend: {{ backend }}</p>
+</div>
 <p><a href="{{ url_for('shell.home') }}">← {{ t('back') }}</a></p>
 {% endblock %}

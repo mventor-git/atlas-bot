@@ -39,6 +39,54 @@ def _can(chat_id, cap, site):
     return _auth().has_capability(chat_id, cap, site)
 
 
+def _mask(chat_id: str | None) -> str:
+    """P0: never render raw chat IDs; show a masked suffix only."""
+    s = str(chat_id or "")
+    return f"***{s[-4:]}" if len(s) > 4 else "***"
+
+
+def _audit(action: str, chat_id: str, req_id: int, site: str,
+           new_value: str = "") -> None:
+    """Append web decisions to the existing event-log trail (bot shares it).
+
+    Identity column keeps the chat_id (storage join); the human-readable
+    value carries ``CODE · Name`` so audit never shows raw chat IDs.
+    """
+    try:
+        by = _who(chat_id)
+        value = f"{new_value} · by {by}".strip(" ·") if new_value else f"by {by}"
+        _svc()["events"].log(
+            chat_id or "web", action, object_type="hr_request",
+            object_id=req_id, new_value=value or None)
+    except Exception:
+        pass  # audit never breaks the decision itself
+
+
+def _directory():
+    """Employee directory repo (None when unwired)."""
+    try:
+        return _svc()["employees"]
+    except Exception:
+        return None
+
+
+def _who(chat_id: str | None) -> str:
+    """Card identity: ``CODE · DB-name``; never Telegram name/chat digits."""
+    repo = _directory()
+    if repo is None:
+        return "UNMAPPED · limited"
+    return repo.display(chat_id or "")
+
+
+def _actor_name(chat_id: str, fallback: str) -> str:
+    """Stored actor name: DB full_name when mapped, else web identity."""
+    repo = _directory()
+    if repo is None:
+        return fallback
+    code, name = repo.resolve(chat_id)
+    return name if code != "UNMAPPED" else fallback
+
+
 @bp.get("/hr")
 @authz.login_required
 def dashboard():
@@ -71,15 +119,28 @@ def dashboard():
 def queue():
     site = _site_or_403()
     s = _svc()
+    chat_id = authz.current_chat_id()
     f_type = request.args.get("type", "")
     f_status = request.args.get("status", "")
-    rows = s["hr"].pending(site)
+    rows = s["hr"].queue(site)  # LOW last, never dropped
     if f_type:
         rows = [r for r in rows if r.request_type == f_type]
     if f_status:
         rows = [r for r in rows if r.status == f_status]
-    return render_template("hr_queue.html", active="hr", site=site,
-                           rows=rows, f_type=f_type, f_status=f_status)
+    try:
+        hr_targets = _auth().chat_ids_for_site(site, "decide_hr_request")
+    except Exception:
+        hr_targets = []
+    who = {c: _who(c) for c in
+           ({r.requester_chat_id for r in rows} | set(hr_targets))}
+    prio = {r.id: s["hr"].priority(r) for r in rows}
+    return render_template(
+        "hr_queue.html", active="hr", site=site, rows=rows,
+        f_type=f_type, f_status=f_status, mask=_mask, who=who, prio=prio,
+        hr_targets=hr_targets,
+        can_confirm=_can(chat_id, "confirm_hr_request", site),
+        can_delegate=_can(chat_id, "delegate_hr_request", site),
+        can_decide=_can(chat_id, "decide_hr_request", site))
 
 
 @bp.get("/hr/requests/<int:req_id>")
@@ -97,11 +158,23 @@ def detail(req_id: int):
         money = s["hr"].financial_status(req_id, site)
     except Exception:
         money = None
+    try:
+        hr_targets = _auth().chat_ids_for_site(site, "decide_hr_request")
+    except Exception:
+        hr_targets = []
+    who_req = _who(req.requester_chat_id)
+    who = {h: _who(h) for h in hr_targets}
+    prio_req = s["hr"].priority(req)
     return render_template(
         "hr_detail.html", active="hr", site=site, req=req,
-        requester=requester, money=money,
+        requester=requester, money=money, mask=_mask,
+        who_req=who_req, who=who, prio_req=prio_req,
+        hr_targets=hr_targets,
         can_confirm=_can(chat_id, "confirm_hr_request", site),
-        can_decide=_can(chat_id, "decide_hr_request", site))
+        can_delegate=_can(chat_id, "delegate_hr_request", site),
+        can_decide=_can(chat_id, "decide_hr_request", site),
+        can_payout=_can(chat_id, "confirm_payout", site),
+        can_deduct=_can(chat_id, "confirm_payroll_deduction", site))
 
 
 @bp.post("/hr/requests/<int:req_id>/confirm")
@@ -113,12 +186,42 @@ def confirm(req_id: int):
     s = _svc()
     chat_id = authz.current_chat_id()
     me = _auth().get_user(chat_id)
-    name = (me.first_name or me.username or chat_id) if me else chat_id
+    name = _actor_name(chat_id, (me.first_name or me.username or chat_id) if me else chat_id)
     try:
         s["hr"].confirm_pm(req_id, chat_id, name, site)
+        _audit("hr.confirm", chat_id, req_id, site, "pending->pm_confirmed")
         flash("Confirmed. Moved to HR decision.")
     except Exception as e:
         flash(f"Could not confirm: {e}")
+    return redirect(url_for("hr.detail", req_id=req_id))
+
+
+@bp.post("/hr/requests/<int:req_id>/delegate")
+@authz.login_required
+@authz.require_capability("delegate_hr_request")
+@authz.csrf_protect
+def delegate(req_id: int):
+    """PM delegate-to-HR (bot parity: single hop, target must decide)."""
+    site = _site_or_403()
+    s = _svc()
+    chat_id = authz.current_chat_id()
+    me = _auth().get_user(chat_id)
+    name = _actor_name(chat_id, (me.first_name or me.username or chat_id) if me else chat_id)
+    target = request.form.get("target", "").strip()
+    if not target:
+        flash("Pick the HQ HR account to delegate to.")
+        return redirect(url_for("hr.detail", req_id=req_id))
+    try:
+        req = s["hr"].get(req_id, site)
+        req_site = (req.site_id or site) if req else site
+        if not _auth().has_capability(target, "decide_hr_request", req_site):
+            flash("Target has no HR decision rights at this site.")
+            return redirect(url_for("hr.detail", req_id=req_id))
+        s["hr"].delegate_to_hr(req_id, chat_id, name, target, site_id=site)
+        _audit("hr.delegate", chat_id, req_id, site, f"delegated to {_who(target)}")
+        flash("Delegated to HR.")
+    except Exception as e:
+        flash(f"Could not delegate: {e}")
     return redirect(url_for("hr.detail", req_id=req_id))
 
 
@@ -131,7 +234,7 @@ def decide(req_id: int):
     s = _svc()
     chat_id = authz.current_chat_id()
     me = _auth().get_user(chat_id)
-    name = (me.first_name or me.username or chat_id) if me else chat_id
+    name = _actor_name(chat_id, (me.first_name or me.username or chat_id) if me else chat_id)
     approve = request.form.get("decision") == "approve"
     note = request.form.get("note", "").strip()
     month = request.form.get("deduction_month", "").strip()
@@ -141,10 +244,107 @@ def decide(req_id: int):
     try:
         s["hr"].decide_hr(req_id, chat_id, name, approve,
                           note=note, deduction_month=month, site_id=site)
+        _audit("hr.decide", chat_id, req_id, site,
+               f"{'approved' if approve else 'rejected'} {note or month}".strip())
         flash("Approved." if approve else "Rejected with note.")
     except Exception as e:
         flash(f"Could not decide: {e}")
     return redirect(url_for("hr.detail", req_id=req_id))
+
+
+@bp.post("/hr/requests/<int:req_id>/payout")
+@authz.login_required
+@authz.require_capability("confirm_payout")
+@authz.csrf_protect
+def payout(req_id: int):
+    site = _site_or_403()
+    s = _svc()
+    chat_id = authz.current_chat_id()
+    try:
+        amount = float(request.form.get("amount", "0"))
+    except (TypeError, ValueError):
+        flash("Amount must be a number.")
+        return redirect(url_for("hr.detail", req_id=req_id))
+    try:
+        s["hr"].record_payout(
+            req_id, amount, request.form.get("payout_date", "").strip(),
+            chat_id, reference=request.form.get("reference", "").strip(),
+            note=request.form.get("note", "").strip(), site_id=site)
+        _audit("hr.payout", chat_id, req_id, site, f"paid {amount}")
+        flash("Payout recorded.")
+    except Exception as e:
+        flash(f"Could not record payout: {e}")
+    return redirect(url_for("hr.detail", req_id=req_id))
+
+
+@bp.post("/hr/requests/<int:req_id>/deduction")
+@authz.login_required
+@authz.require_capability("confirm_payroll_deduction")
+@authz.csrf_protect
+def deduction(req_id: int):
+    site = _site_or_403()
+    s = _svc()
+    chat_id = authz.current_chat_id()
+    try:
+        amount = float(request.form.get("amount", "0"))
+    except (TypeError, ValueError):
+        flash("Amount must be a number.")
+        return redirect(url_for("hr.detail", req_id=req_id))
+    try:
+        s["hr"].record_deduction(
+            req_id, amount, request.form.get("period", "").strip(),
+            chat_id, deduction_date=request.form.get(
+                "deduction_date", "").strip(),
+            reference=request.form.get("reference", "").strip(),
+            note=request.form.get("note", "").strip(), site_id=site)
+        _audit("hr.deduction", chat_id, req_id, site,
+               f"deducted {amount} {request.form.get('period', '')}".strip())
+        flash("Deduction recorded.")
+    except Exception as e:
+        flash(f"Could not record deduction: {e}")
+    return redirect(url_for("hr.detail", req_id=req_id))
+
+
+# --- attendance claims (existing model, newly wired to web) -------------------
+
+@bp.get("/hr/claims")
+@authz.login_required
+@authz.require_capability(("manage_attendance", "manage_payroll"))
+def claims():
+    site = _site_or_403()
+    s = _svc()
+    chat_id = authz.current_chat_id()
+    try:
+        rows = s["attendance_days"].open_claims(site_id=site)
+    except Exception:
+        rows = []
+    return render_template(
+        "hr_claims.html", active="hr", site=site, rows=rows, mask=_mask,
+        can_decide=_can(chat_id, "manage_attendance", site))
+
+
+@bp.post("/hr/claims/<int:claim_id>/decide")
+@authz.login_required
+@authz.require_capability("manage_attendance")
+@authz.csrf_protect
+def claim_decide(claim_id: int):
+    site = _site_or_403()
+    s = _svc()
+    chat_id = authz.current_chat_id()
+    approve = request.form.get("decision") == "approve"
+    note = request.form.get("note", "").strip()
+    if not note:
+        flash("Claim decisions require a note.")
+        return redirect(url_for("hr.claims"))
+    try:
+        s["attendance_days"].decide_claim(
+            claim_id, chat_id, approve, note, site_id=site)
+        _audit("attendance.claim_decide", chat_id, claim_id, site,
+               f"{'approved' if approve else 'denied'}: {note}")
+        flash("Claim approved." if approve else "Claim denied.")
+    except Exception as e:
+        flash(f"Could not decide claim: {e}")
+    return redirect(url_for("hr.claims"))
 
 
 # --- employees -------------------------------------------------------------

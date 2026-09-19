@@ -5,7 +5,7 @@
 {% with m = get_flashed_messages() %}{% if m %}<div class="flash">{{ m|join(' ') }}</div>{% endif %}{% endwith %}
 <h2>Summary</h2>
 <dl class="kv">
-  <dt>Requester</dt><dd>{{ req.requester_name }} ({{ req.requester_chat_id }})</dd>
+  <dt>Requester</dt><dd>{{ who_req }}{% if prio_req == 'low' %} <span class="badge warn">LOW — incomplete docs (filed, never blocked)</span>{% endif %}</dd>
   <dt>{{ t('site') }}</dt><dd>{{ req.site_id }}</dd>
   <dt>Amount</dt><dd>{{ req.amount }}</dd>
   <dt>Reason</dt><dd>{{ req.reason }}</dd>
@@ -53,6 +53,39 @@
 </form>
 {% elif req.status not in ('approved','rejected') %}
 <p style="color:var(--stone)">No decision action available to you on this request.</p>
+{% endif %}
+{% if req.status in ('pending','pm_confirmed') and can_delegate and not req.delegated %}
+<h2>Delegate</h2>
+<form method="post" action="{{ url_for('hr.delegate', req_id=req.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label for="target">Delegate to HQ HR (single hop)</label>
+  <select id="target" name="target">{% for h in hr_targets %}<option value="{{ h }}">{{ who.get(h, 'UNMAPPED · limited') }}</option>{% endfor %}</select>
+  <p><button class="btn" type="submit">Delegate to HR</button></p>
+</form>
+{% endif %}
+{% if req.status == 'approved' %}
+<h2>Money</h2>
+{% if can_payout and req.request_type in ('advance','transport') %}
+<form method="post" action="{{ url_for('hr.payout', req_id=req.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label>Amount</label><input name="amount" inputmode="decimal">
+  <label>Payout date YYYY-MM-DD</label><input name="payout_date" placeholder="2026-09-18">
+  <label>Reference</label><input name="reference" style="inline-size:100%">
+  <label>Note</label><input name="note" style="inline-size:100%">
+  <p><button class="btn" type="submit">Confirm payout</button></p>
+</form>
+{% endif %}
+{% if can_deduct and req.request_type == 'advance' %}
+<form method="post" action="{{ url_for('hr.deduction', req_id=req.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token','') }}">
+  <label>Amount</label><input name="amount" inputmode="decimal">
+  <label>Period YYYY-MM</label><input name="period" placeholder="2026-10">
+  <label>Deduction date YYYY-MM-DD</label><input name="deduction_date" placeholder="2026-10-01">
+  <label>Reference</label><input name="reference" style="inline-size:100%">
+  <label>Note</label><input name="note" style="inline-size:100%">
+  <p><button class="btn" type="submit">Confirm deduction</button></p>
+</form>
+{% endif %}
 {% endif %}
 <p><a href="{{ url_for('hr.queue') }}">← {{ t('back') }}</a></p>
 {% endblock %}
