@@ -83,18 +83,17 @@ def _get_role_level(role: str) -> int:
 
 
 def hr_menu_keyboard(role: str = "pending") -> InlineKeyboardMarkup:
-    """HR menu: request buttons for everyone, queue for PM/HR/superadmin."""
+    """HR menu: 3 max (A1). Reviewers trade My Requests for the queue view;
+    My Requests lives one tap inside the queue (pending view footer)."""
+    B = InlineKeyboardButton
+    new = [B("Request Advance", callback_data="hr_new_advance"),
+           B("Request Transport", callback_data="hr_new_transport")]
     level = _get_role_level(role)
-    keyboard = [
-        [
-            InlineKeyboardButton("Request Advance", callback_data="hr_new_advance"),
-            InlineKeyboardButton("Request Transport", callback_data="hr_new_transport"),
-        ],
-        [InlineKeyboardButton("My Requests", callback_data="hr_my")],
-    ]
     if level >= 100 and role in ("superadmin", "project_manager", "hr"):
-        keyboard.append([InlineKeyboardButton("Approval Queue", callback_data="hr_pending")])
-    return InlineKeyboardMarkup(keyboard)
+        new.append(B("Approval Queue", callback_data="hr_pending"))
+    else:
+        new.append(B("My Requests", callback_data="hr_my"))
+    return cap_buttons(new, 3)
 
 
 def hr_month_keyboard(request_id: int) -> InlineKeyboardMarkup:

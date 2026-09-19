@@ -300,6 +300,8 @@ def main() -> None:
             calendar_for=lambda site: WorkingCalendar(config, site))
         case_service = CaseService(CaseRepository(db_manager))
         discipline_service = DisciplineService(DisciplineRepository(db_manager))
+        from app.repositories.employee_repository import EmployeeRepository
+        employee_repo = EmployeeRepository(db_manager)
 
         logger.info("All services initialized.")
 
@@ -358,6 +360,7 @@ def main() -> None:
             discipline_service=discipline_service,
             payroll_service=payroll_service,
             notification_outbox=notification_outbox,
+            employee_repo=employee_repo,
         )
 
         # Wire notification manager & watchdog via post_init / post_stop

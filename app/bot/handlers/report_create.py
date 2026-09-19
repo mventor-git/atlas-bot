@@ -680,7 +680,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                    "awaiting_lmo_hours", "awaiting_att_note",
                    "awaiting_case_summary", "awaiting_case_note",
                    "awaiting_case_appeal", "awaiting_disc_note",
-                   "awaiting_disc_appeal", "awaiting_salary_csv"):
+                   "awaiting_disc_appeal", "awaiting_salary_csv",
+                   "awaiting_register_name", "awaiting_reg_approve_detail",
+                   "awaiting_reg_reject_reason"):
         # Forward to HR handlers (imported here to avoid circular dependency)
         from app.bot.handlers import hr as hr_handlers
 
@@ -748,6 +750,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             from app.bot.handlers import payroll as payroll_handlers
 
             await payroll_handlers.handle_salary_csv(update, context)
+        elif state == "awaiting_register_name":
+            from app.bot.handlers import register as register_handlers
+
+            await register_handlers.handle_register_name(update, context)
+        elif state == "awaiting_reg_approve_detail":
+            from app.bot.handlers import register as register_handlers
+
+            await register_handlers.handle_approve_detail(update, context)
+        elif state == "awaiting_reg_reject_reason":
+            from app.bot.handlers import register as register_handlers
+
+            await register_handlers.handle_reject_reason(update, context)
         elif state == "awaiting_report_reject_note":
             from app.bot.handlers import start as start_handlers
 

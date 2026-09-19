@@ -23,19 +23,27 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 BOT_COMMANDS: list[tuple[str, str]] = [
-    ("start", "Today's dashboard"),
-    ("new", "Start a new report"),
-    ("copy", "Copy yesterday's report"),
-    ("done", "Finish the current report"),
-    ("search", "Find reports by date or name"),
-    ("get", "Get a report PDF by date"),
+    ("start", "HR Manager — today's HR + reports dashboard"),
     ("myday", "Your attendance today"),
     ("checkin", "Check in for today"),
     ("checkout", "Check out for today"),
     ("hr", "HR services menu"),
     ("leave", "Request leave"),
+    ("mission", "Request a work mission"),
+    ("overtime", "Request overtime"),
     ("mypay", "Your salary summary"),
-    ("help", "All commands grouped"),
+    ("grievance", "File a grievance"),
+    ("hr_skip", "Skip the current HR step"),
+    ("hr_pay", "Confirm an HR payout"),
+    ("hr_deduct", "Confirm a payroll deduction"),
+    ("status", "Session and system health summary"),
+    ("stop", "Stop and back to dashboard"),
+    ("new", "Start a new report"),
+    ("copy", "Copy yesterday's report"),
+    ("done", "Finish the current report"),
+    ("search", "Find reports by date or name"),
+    ("get", "Get a report PDF by date"),
+    ("help", "All commands grouped HR-first"),
     ("cancel", "Cancel and back to dashboard"),
     ("admin", "Admin panel"),
 ]
@@ -43,8 +51,12 @@ BOT_COMMANDS: list[tuple[str, str]] = [
 
 async def post_init_commands(app) -> None:
     """Telegram command menu (called as Application post_init)."""
-    from telegram import BotCommand
+    from telegram import BotCommand, MenuButtonCommands
     await app.bot.set_my_commands([BotCommand(c, d) for c, d in BOT_COMMANDS])
+    try:
+        await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception:
+        pass
 
 
 def _get_auth(context: ContextTypes.DEFAULT_TYPE):
@@ -61,12 +73,85 @@ def _get_role(context: ContextTypes.DEFAULT_TYPE, chat_id: str) -> str:
     return auth.get_role(chat_id)
 
 
+# Tenancy identity that must survive a /start reset. Everything else in
+# user_data is a transient flow flag (state, current_report, offhours /
+# site-pick tokens, per-flow ids) and is dropped so /start never resumes
+# a stale conversation.
+_PRESERVED_STATE_KEYS = frozenset({"active_site"})
+
+
+def _reset_transient_state(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Drop stale flow flags; preserve tenancy identity only."""
+    user_data = getattr(context, "user_data", None)
+    if not user_data:
+        return
+    for key in [k for k in user_data if k not in _PRESERVED_STATE_KEYS]:
+        user_data.pop(key, None)
+
+
+def _hr_summary_line(context: ContextTypes.DEFAULT_TYPE, telegram_user: str) -> str:
+    """Best-effort HR lead: attendance state, pending approvals, advances. Never raises."""
+    att, pend, adv = "—", "—", "—"
+    try:
+        svc = (context.bot_data or {}).get("attendance_day_service")
+        if svc is not None:
+            from datetime import date as _d
+            v = svc.day_view(telegram_user, _d.today().isoformat())
+            day = (v or {}).get("day")
+            att = getattr(day, "status", None) or "—"
+    except Exception:
+        pass
+    try:
+        hr = (context.bot_data or {}).get("hr_service")
+        if hr is not None:
+            rows = hr.pending() or []
+            pend = str(len(rows))
+            adv = str(sum(1 for r in rows if str(getattr(r, "request_type", "")) == "advance"))
+    except Exception:
+        pass
+    return f"\U0001f4cb HR: attendance *{att}* · approvals *{pend}* · advances *{adv}*"
+
+
+def _dashboard_payload(
+    context: ContextTypes.DEFAULT_TYPE, *, name: str, telegram_user: str,
+):
+    """One entry seam for the A1 dashboard: same text+buttons every call."""
+    from app.bot.keyboards import _get_role_level as _lvl
+    dashboard_service: DailyDashboardService = context.bot_data["daily_dashboard_service"]
+    repo: ReportRepository = context.bot_data["report_repository"]
+
+    role = _get_role(context, telegram_user)
+    dash = dashboard_service.get_dashboard(today=date.today().isoformat())
+    all_reports = repo.get_all() if repo else []
+    has_reports = len(all_reports) > 0
+
+    from app.utils.business_hours import is_business_hours
+    in_business_hours = is_business_hours()
+
+    clean = (name or "there").split()[0]
+    status = dash.report_status.replace('_', ' ').title()
+    hr_line = _hr_summary_line(context, telegram_user)
+    text = (
+        f"\U0001f454 *Atlas — HR Manager*\n"
+        f"Hey {clean} \U0001f44b — HR first, reports beside it:\n\n"
+        f"{hr_line}\n"
+        f"\U0001f4c5 {dash.date} ({dash.day}) · \u23f0 {dash.time}\n"
+        f"Report: *{status}* · Contractors: *{dash.contractor_count}* · Workers: *{dash.total_workers}*\n"
+        f"Time remaining: *{dash.time_remaining if dash.time_remaining else 'N/A'}*\n\n"
+        f"Pick one to continue \U0001f447"
+    )
+
+    keyboard = start_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
+    if _lvl(role) >= 20 and not (_lvl(role) >= 40 and in_business_hours):
+        text += f"\n\n_{VIEW_ONLY_HINT}_"
+    return text, keyboard
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from app.services.authorization_service import AuthorizationService
 
     telegram_user = str(update.effective_user.id)
     auth: AuthorizationService = context.bot_data["authorization_service"]
-    dashboard_service: DailyDashboardService = context.bot_data["daily_dashboard_service"]
 
     # Register or identify the user on every /start
     user_info = update.effective_user
@@ -101,33 +186,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    # Authorized — show dashboard
-    dash = dashboard_service.get_dashboard(
-        today=date.today().isoformat(),
+    # Idempotent entry: drop stale flow flags first, then ALWAYS dashboard.
+    _reset_transient_state(context)
+    name = user_info.first_name or user_info.username or "there"
+    text, keyboard = _dashboard_payload(
+        context, name=name, telegram_user=telegram_user,
     )
-    # Check if any reports exist
-    repo: ReportRepository = context.bot_data["report_repository"]
-    all_reports = repo.get_all() if repo else []
-    has_reports = len(all_reports) > 0
-
-    # Check business hours
-    from app.utils.business_hours import is_business_hours
-    in_business_hours = is_business_hours()
-
-    name = (user_info.first_name or user_info.username or "there").split()[0]
-    status = dash.report_status.replace('_', ' ').title()
-    text = (
-        f"Hey {name} \U0001f44b — here's today at a glance:\n\n"
-        f"\U0001f4c5 {dash.date} ({dash.day}) · \u23f0 {dash.time}\n"
-        f"Status: *{status}* · Contractors: *{dash.contractor_count}* · Workers: *{dash.total_workers}*\n"
-        f"Time remaining: *{dash.time_remaining if dash.time_remaining else 'N/A'}*\n\n"
-        f"Pick one to continue \U0001f447"
-    )
-
-    keyboard = start_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
-    from app.bot.keyboards import _get_role_level as _lvl
-    if _lvl(role) >= 20 and not (_lvl(role) >= 40 and in_business_hours):
-        text += f"\n\n_{VIEW_ONLY_HINT}_"
 
     if update.callback_query:
         await update.callback_query.edit_message_text(
@@ -197,24 +261,33 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     auth = _get_auth(context)
 
     text = (
-        "*Labor Report Bot — commands*\n\n"
-        "📝 *Reports*\n"
+        "*Atlas — HR Manager — commands*\n\n"
+        "👔 *HR*\n"
+        "/hr — HR services menu\n"
+        "/leave — Request leave\n"
+        "/mission — Request a work mission\n"
+        "/overtime — Request overtime\n"
+        "/grievance — File a grievance\n"
+        "/hr_skip — Skip the current HR step\n"
+        "/hr_pay — Confirm an HR payout\n"
+        "/hr_deduct — Confirm a payroll deduction\n\n"
+        "👷 *Attendance*\n"
+        "/myday — Your attendance today\n"
+        "/checkin — Check in for today\n"
+        "/checkout — Check out for today\n\n"
+        "💰 *HR & Pay*\n"
+        "/mypay — Your salary summary\n"
+        "/status — Session and system health summary\n"
+        "/stop — Stop and back to dashboard\n\n"
+        "📝 *Reports (feature)*\n"
         "/new — Start a new report\n"
         "/copy — Copy yesterday's report\n"
         "/done — Finish the current report\n"
         "/search — Find reports by date or name\n"
         "/get — Get a report PDF by date\n\n"
-        "👷 *Attendance*\n"
-        "/myday — Your attendance today\n"
-        "/checkin — Check in for today\n"
-        "/checkout — Check out for today\n\n"
-        "💼 *HR & Pay*\n"
-        "/hr — HR services menu\n"
-        "/leave — Request leave\n"
-        "/mypay — Your salary summary\n\n"
-        "⚙️ *General*\n"
-        "/start — Today's dashboard\n"
-        "/help — All commands grouped\n"
+        "⚙️ *Admin & General*\n"
+        "/start — HR Manager dashboard\n"
+        "/help — All commands grouped HR-first\n"
         "/cancel — Cancel and back to dashboard\n"
         "/admin — Admin panel\n\n"
         "_Tip:_ type a date like `12-07-2026` or `yesterday` to get the PDF."
@@ -290,36 +363,13 @@ async def fresh_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_user = str(update.effective_user.id)
-    role = _get_role(context, telegram_user)
-    dashboard_service: DailyDashboardService = context.bot_data["daily_dashboard_service"]
-
-    # Check business hours
-    from app.utils.business_hours import is_business_hours
-    in_business_hours = is_business_hours()
-
-    dash = dashboard_service.get_dashboard(
-        today=date.today().isoformat(),
+    # Same seam as /start: reset transient flags, render identical dashboard.
+    _reset_transient_state(context)
+    user_info = update.effective_user
+    name = (user_info.first_name or user_info.username or "there") if user_info else "there"
+    text, keyboard = _dashboard_payload(
+        context, name=name, telegram_user=telegram_user,
     )
-
-    repo: ReportRepository = context.bot_data["report_repository"]
-    all_reports = repo.get_all() if repo else []
-    has_reports = len(all_reports) > 0
-
-    text = (
-        f"\U0001f4cb *Labor Report Bot*\n\n"
-        f"\U0001f4c5 {dash.date} ({dash.day})\n"
-        f"\u23f0 {dash.time}\n\n"
-
-        f"*Status:* {dash.report_status.replace('_', ' ').title()}\n"
-        f"*Contractors:* {dash.contractor_count}\n"
-        f"*Total Workers:* {dash.total_workers}\n"
-        f"*Time Remaining:* {dash.time_remaining if dash.time_remaining else 'N/A'}"
-    )
-
-    keyboard = start_menu_keyboard(dash.report_status, role=role, has_reports=has_reports, is_business_hours=in_business_hours)
-    from app.bot.keyboards import _get_role_level as _lvl2
-    if _lvl2(role) >= 20 and not (_lvl2(role) >= 40 and in_business_hours):
-        text += f"\n\n_{VIEW_ONLY_HINT}_"
 
     # Handle "Message is not modified" error gracefully
     try:
@@ -2025,11 +2075,72 @@ async def handle_report_reject_note(update: Update,
                          reason=report.reject_note or "")
 
 
+async def _handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hermes-style command search: 50/page over BOT_COMMANDS (vendored filter)."""
+    from app.bot.vendor_hermes.inline_picker import PAGE_SIZE, filter_catalog
+    from telegram import InlineQueryResultArticle, InputTextMessageContent
+    q = update.inline_query
+    query = (q.query or "")
+    catalog = [{"name": c, "description": d} for c, d in BOT_COMMANDS]
+    matches = filter_catalog(catalog, query.split(None, 1)[0] if query.strip() else "")
+    args = query.strip().split(None, 1)[1] if len(query.strip().split(None, 1)) > 1 else ""
+    try:
+        start = int(q.offset) if q.offset else 0
+    except (TypeError, ValueError):
+        start = 0
+    page = matches[start:start + PAGE_SIZE]
+    results = [
+        InlineQueryResultArticle(
+            id=f"{start}:{m['name']}"[:64],
+            title=f"/{m['name']}",
+            description=(m.get("description") or "")[:100],
+            input_message_content=InputTextMessageContent(
+                f"/{m['name']}" + (f" {args}" if args else "")),
+        )
+        for m in page
+    ]
+    nxt = str(start + PAGE_SIZE) if len(matches) > start + PAGE_SIZE else ""
+    await q.answer(results, cache_time=10, next_offset=nxt, is_personal=True)
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Session/health summary card — reuses the admin health counts (read-only)."""
+    telegram_user = str(update.effective_user.id)
+    role = _get_role(context, telegram_user)
+    try:
+        repo = context.bot_data.get("report_repository")
+        all_reports = repo.get_all() if repo else []
+        total = len(all_reports)
+        drafts = sum(1 for r in all_reports if r.status and r.status.value == "draft")
+        finals = sum(1 for r in all_reports if r.status and r.status.value == "final")
+        locked = sum(1 for r in all_reports if r.status and r.status.value == "locked")
+        text = (
+            f"\U0001f4ca *Atlas — HR Manager · Status*\n\n"
+            f"Role: `{role}` · Reports: *{total}* "
+            f"(draft *{drafts}* / final *{finals}* / locked *{locked}*)\n"
+            f"HR: {_hr_summary_line(context, telegram_user)}\n"
+            f"Status: OK"
+        )
+    except Exception:
+        text = "Status check failed. Try /start."
+    await update.message.reply_text(text, parse_mode="Markdown",
+                                    reply_to_message_id=update.message.message_id)
+
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Stop-style: cancel everything, back to the HR dashboard (reuses cancel)."""
+    await cancel_command(update, context)
+
+
 def get_registration_handlers() -> list:
+    from telegram.ext import InlineQueryHandler
     from app.utils.business_hours import get_offhours_handlers
     return [
         CommandHandler("start", start_command),        CommandHandler("help", help_command),
         CommandHandler("cancel", cancel_command),
+        CommandHandler("status", status_command),
+        CommandHandler("stop", stop_command),
+        InlineQueryHandler(_handle_inline_query),
         CommandHandler("fresh", fresh_start_command),
         CommandHandler("preview", preview_pdf_command),
         CommandHandler("finalize", finalize_command),
