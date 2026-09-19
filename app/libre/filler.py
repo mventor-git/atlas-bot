@@ -75,13 +75,16 @@ class TemplateFiller:
             Path to the saved .ods file.
         """
         items = list(report.items or [])
-        if use_v3 and items:
+        if use_v3:
             if output_path is None:
                 output_path = str(
                     self._config.docs_folder_path / f"{report.date}.ods"
                 )
-            from app.libre import daily_v3 as _v3
-            return _v3.build(report, self._config, output_path)
+            if items:
+                from app.libre import daily_v3 as _v3
+                return _v3.build(report, self._config, output_path)
+            from app.libre import nolabor_v3 as _nl
+            return _nl.build(report, self._config, output_path)
         return self._fill_legacy(report, output_path)
 
     def _fill_legacy(self, report: Report,

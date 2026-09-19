@@ -86,8 +86,10 @@ class TestTemplatePick:
         assert template_for("advance", config).name == "hr-advance-template.ots"
         assert template_for("transport", config).name == "acc-transport-template.ots"
 
-    def test_ar_variant(self, config):
-        assert template_for("advance", config, lang="ar").name == "hr-advance-template_ar.ots"
+    def test_ar_lang_resolves_en_base(self, config):
+        # English-only rule: lang=ar still resolves the EN base template.
+        assert template_for("advance", config, lang="ar").name == "hr-advance-template.ots"
+        assert template_for("transport", config, lang="ar").name == "acc-transport-template.ots"
 
     def test_missing_template_raises(self, config, temp_dir: Path):
         from app.models.config import AppConfig
@@ -109,10 +111,12 @@ class TestFillAdvance:
         assert "HR-0007" in flat and "1500" in flat and "medical" in flat
         assert "2026-10" in flat and "PM One" in flat and "HR One" in flat
 
-    def test_ar_variant_fills(self, config, temp_dir: Path):
+    def test_ar_lang_fills_en_with_no_arabic_chars(self, config, temp_dir: Path):
+        # English-only rule: even lang=ar fills the EN base, 0 Arabic chars.
         out = fill_hr(_approved_advance(), config, str(temp_dir / "a.ods"), lang="ar")
         flat = _texts(Path(out))
         assert "HR-0007" in flat and "[REF]" not in flat
+        assert not any("\u0600" <= ch <= "\u06FF" for ch in flat)
 
 
 class TestFillTransport:

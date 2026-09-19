@@ -27,17 +27,12 @@ PRINT_QUEUE = Path("exports/print_queue")
 
 
 def template_for(request_type: str, config: AppConfig, lang: str | None = None) -> Path:
-    """Resolve the HR template path for type + language."""
-    language = (lang or getattr(config, "language", "en") or "en").lower()
-    suffix = "_ar" if language.startswith("ar") else ""
+    """Resolve the HR template path for type + language (EN-only; AR dormant)."""
+    # English-only: ignore lang/config language; _ar.ots files left on disk.
     if request_type == HRRequestType.TRANSPORT:
         base = Path(config.template.hr_transport_template)
     else:
         base = Path(config.template.hr_advance_template)
-    if suffix:
-        candidate = base.parent / (base.stem + "_ar" + base.suffix)
-        if candidate.exists():
-            return candidate
     return base
 
 

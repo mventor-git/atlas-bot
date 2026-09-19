@@ -253,13 +253,17 @@ def apply_daily(doc, table, header_idx: int, totals_idx: int,
 COVER_META: dict[str, list[str]] = {
     "daily": ["company", "site", "date", "automated-by"],
     "contractor": ["company", "contractor", "period", "automated-by"],
-    "advance": ["company", "requester", "date", "automated-by"],
+    "advance": ["reference", "date", "requester", "chat-id", "site",
+                "company", "automated-by"],
+    "transport": ["reference", "date", "requester", "chat-id", "site",
+                  "company", "automated-by"],
 }
 
 COVER_LABELS: dict[str, str] = {
     "company": "Company", "site": "Site", "date": "Date",
     "automated-by": "Automated By", "contractor": "Contractor",
-    "period": "Period", "requester": "Requester",
+    "period": "Period", "requester": "Requester", "reference": "Reference",
+    "chat-id": "Chat ID",
 }
 
 
@@ -284,6 +288,9 @@ V2_HDR_RULE = "1pt solid #000000"
 # ponytail: portrait printable is 19cm (21 - 2x1cm margins); scaled v1 mix.
 DAILY_V2_WIDTHS = ("0.9cm", "3.8cm", "2.4cm", "2.4cm", "1.8cm",
                    "1.8cm", "1.8cm", "4.1cm")
+# ponytail: 6-col contractor period, sums to 19cm portrait printable.
+CONTRACTOR_V2_WIDTHS = ("2.6cm", "2.0cm", "2.6cm", "6.0cm",
+                        "2.9cm", "2.9cm")
 _AR = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+")
 
 
